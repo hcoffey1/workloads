@@ -4,7 +4,7 @@ git submodule init
 git submodule update
 
 sudo apt update
-sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich
+sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich -y
 
 conda tos accept
 conda create -n dataVis pandas matplotlib seaborn -y
@@ -24,7 +24,7 @@ cd ..
 # GAPBS
 cd gapbs
 git apply ../patches/gapbs.patch
-make bench-graphs -j20
+make bench-graphs -j2
 make -j20
 cd ..
 
