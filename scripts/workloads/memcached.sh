@@ -44,13 +44,41 @@ run_memcached(){
     sleep 5
 
     # RUN: Record performance
-    /usr/bin/time -v -o "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt" \
+    # paths / names
+    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
+    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
+    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
+    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
+    WRAPPER="${OUTPUT_DIR}/run_memcached_${workload}.sh"
+
+    # create wrapper for YCSB client (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
+    cat > "$WRAPPER" <<EOF
+#!/bin/sh
+# write this process's PID (will be the PID of ycsb after exec)
+echo \$\$ > "$PIDFILE"
+
+# change to YCSB directory
+cd "$CUR_PATH/YCSB"
+
+# replace shell with the real binary so PID stays the same
+exec ./bin/ycsb run memcached -s -P "$CUR_PATH/YCSB/workloads/workloada" \\
+    -p "memcached.hosts=127.0.0.1" -threads "$client_threads"
+EOF
+    chmod +x "$WRAPPER"
+
+    # run under numactl; time measures the wrapper -> execed ycsb
+    /usr/bin/time -v -o "$TIMEFILE" \
         numactl --cpunodebind=1 --membind=1 \
-        ./bin/ycsb run memcached -s -P $CUR_PATH/YCSB/workloads/workloada \
-        -p "memcached.hosts=127.0.0.1" -threads $client_threads \
-        1> "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt" \
-        2> "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt" &
-    workload_pid=$!
+        "$WRAPPER" \
+        1> "$STDOUT" 2> "$STDERR" &
+
+    # wait until wrapper has written pidfile (tiny loop is fine)
+    while [ ! -s "$PIDFILE" ]; do sleep 0.01; done
+    workload_pid=$(cat "$PIDFILE")
+    echo "workload_pid=$workload_pid"
+
+    # optional: cleanup wrapper if you don't need it
+    rm -f "$WRAPPER"
 
     popd
 }

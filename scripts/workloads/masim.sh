@@ -10,13 +10,37 @@ build_masim(){
 
 run_masim(){
     local workload=$1
+    # paths / names
+    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
+    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
+    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
+    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
+    WRAPPER="${OUTPUT_DIR}/run_masim_${workload}.sh"
 
-    /usr/bin/time -v -o ${OUTPUT_DIR}/${workload}_time.txt \
+    # create wrapper (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
+    cat > "$WRAPPER" <<EOF
+#!/bin/sh
+# write this process's PID (will be the PID of masim after exec)
+echo \$\$ > "$PIDFILE"
+
+# replace shell with the real binary so PID stays the same
+exec "$CUR_PATH/masim/$workload" "$CUR_PATH/masim/configs/hc.cfg" -c 2
+EOF
+    chmod +x "$WRAPPER"
+
+    # run with taskset; time measures the wrapper -> execed masim
+    /usr/bin/time -v -o "$TIMEFILE" \
         taskset 0xFF \
-        $CUR_PATH/scripts/vma/record_vma.sh $OUTPUT_DIR \
-        $CUR_PATH/masim/$1 $CUR_PATH/masim/configs/hc.cfg -c 2 &
-    workload_pid=$!
+        "$WRAPPER" \
+        1> "$STDOUT" 2> "$STDERR" &
 
+    # wait until wrapper has written pidfile (tiny loop is fine)
+    while [ ! -s "$PIDFILE" ]; do sleep 0.01; done
+    workload_pid=$(cat "$PIDFILE")
+    echo "workload_pid=$workload_pid"
+
+    # optional: cleanup wrapper if you don't need it
+    rm -f "$WRAPPER"
 }
 
 run_strace_masim(){

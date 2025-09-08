@@ -11,15 +11,43 @@ build_merci(){
 
 run_merci(){
     local workload=$1
-    /usr/bin/time -v -o "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt" \
-        numactl --cpunodebind=0 --membind=0 \
-        sudo LD_PRELOAD=$HEMEMPOL DRAMSIZE=$DRAMSIZE MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE \
-        HOME=$CUR_PATH \
-        $CUR_PATH/MERCI/4_performance_evaluation/bin/eval_baseline --dataset amazon_All -r $num_reps -c $num_threads \
-        1> "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt" \
-        2> "${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt" &
+    # paths / names
+    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
+    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
+    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
+    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
+    WRAPPER="${OUTPUT_DIR}/run_merci_${workload}.sh"
 
-    workload_pid=$!
+    # create wrapper (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
+    cat > "$WRAPPER" <<EOF
+#!/bin/sh
+# write this process's PID (will be the PID of eval_baseline after exec)
+echo \$\$ > "$PIDFILE"
+
+# env only for the workload (time is not affected)
+export LD_PRELOAD="$HEMEMPOL"
+export DRAMSIZE="$DRAMSIZE"
+export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
+export HOME="$CUR_PATH"
+
+# replace shell with the real binary so PID stays the same
+exec "$CUR_PATH/MERCI/4_performance_evaluation/bin/eval_baseline" --dataset amazon_All -r "$num_reps" -c "$num_threads"
+EOF
+    chmod +x "$WRAPPER"
+
+    # run under numactl; time measures the wrapper -> execed eval_baseline
+    sudo numactl --cpunodebind=0 --membind=0 \
+        /usr/bin/time -v -o "$TIMEFILE" \
+        "$WRAPPER" \
+        1> "$STDOUT" 2> "$STDERR" &
+
+    # wait until wrapper has written pidfile (tiny loop is fine)
+    while [ ! -s "$PIDFILE" ]; do sleep 0.01; done
+    workload_pid=$(cat "$PIDFILE")
+    echo "workload_pid=$workload_pid"
+
+    # optional: cleanup wrapper if you don't need it
+    rm -f "$WRAPPER"
 }
 
 run_strace_merci(){
