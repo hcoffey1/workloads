@@ -52,6 +52,9 @@ MERCI/data
 logs.txt
 stats.txt
 times.txt
+*.backup
+*.xl
+*.par
 
 # Jupyter Notebook
 .ipynb_checkpoints
