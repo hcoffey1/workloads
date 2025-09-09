@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Source workload utilities
+source "$CUR_PATH/scripts/workload_utils.sh"
+
 translate_workload(){
     case "$1" in
         "cactus")
@@ -29,12 +32,9 @@ build_spec(){
 
 run_spec(){
     local workload=$1
-    # paths / names
-    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
-    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
-    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
-    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
-    WRAPPER="${OUTPUT_DIR}/run_spec_${workload}.sh"
+
+    # Use utility functions to set up filenames
+    generate_workload_filenames "$workload"
 
     # Define workload-specific parameters
     local binary_path input_file_path
@@ -80,36 +80,9 @@ run_spec(){
     echo "Binary: $binary_path"
     echo "Input file: $input_file_path"
 
-    # create wrapper (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
-    cat > "$WRAPPER" <<EOF
-#!/bin/sh
-# write this process's PID (will be the PID of SPEC binary after exec)
-echo \$\$ > "$PIDFILE"
-
-# env only for the workload (time is not affected)
-export LD_PRELOAD="$HEMEMPOL"
-export DRAMSIZE="$DRAMSIZE"
-export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
-
-# replace shell with the real binary so PID stays the same
-exec "$binary_path" "$input_file_path"
-EOF
-    chmod +x "$WRAPPER"
-
-    # run under numactl; time measures the wrapper -> execed SPEC binary
-    sudo numactl --cpunodebind=0 --membind=0 \
-        /usr/bin/time -v -o "$TIMEFILE" \
-        "$WRAPPER" \
-        1> "$STDOUT" 2> "$STDERR" &
-
-    # wait until wrapper has written pidfile (tiny loop is fine)
-    while [ ! -s "$PIDFILE" ]; do sleep 0.01; done
-    workload_pid=$(cat "$PIDFILE")
-    echo "workload_pid=$workload_pid"
-
-    # optional: cleanup wrapper if you don't need it
-    rm -f "$WRAPPER"
-    rm -f "$PIDFILE"
+    # Use utility function to create and run workload
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "\"$input_file_path\""
+    run_workload_standard "--cpunodebind=0 --membind=0"
 }
 
 run_strace_spec(){

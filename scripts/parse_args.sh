@@ -1,5 +1,15 @@
-#!/bin/bash
-# Define options and positional arguments
+#!#ARG_OPTIONAL_SINGLE([suite],[s],[Benchmark suite (e.g. gapbs)])
+#ARG_OPTIONAL_SINGLE([workload],[w],[Name of the workload to run (e.g. pr)])
+#ARG_OPTIONAL_SINGLE([config_file],[f],[YAML configuration file for workload parameters],[""])
+#ARG_OPTIONAL_SINGLE([output_dir],[o],[Output directory],[""])
+#ARG_OPTIONAL_SINGLE([instrument],[i],[Instrumentation tool: 'pebs', 'damon' (default: none)],["none"])
+#ARG_OPTIONAL_SINGLE([iterations],[r],[Number of iterations to run (default: 1)],[1])
+#ARG_OPTIONAL_SINGLE([sampling_rate],[s],[Damon Sampling Rate (microseconds), default: 5000],[5000])
+#ARG_OPTIONAL_SINGLE([aggregate_rate],[a],[Damon Aggregate Rate (milliseconds), default: 100],[100])
+#ARG_OPTIONAL_SINGLE([min_damon],[n],[Min # of Damon regions],[""])
+#ARG_OPTIONAL_SINGLE([max_damon],[m],[Max # of Damon regions],[""])
+#ARG_OPTIONAL_SINGLE([auto_access_bp],[x],[Damon auto access_bp flag],[""])
+#ARG_OPTIONAL_SINGLE([auto_aggrs],[y],[Damon auto aggregation flag],[""])  Define options and positional arguments
 #ARG_OPTIONAL_SINGLE([suite],[s],[Benchmark suite (e.g. gapbs)])
 #ARG_OPTIONAL_SINGLE([workload],[w],[Name of the workload to run (e.g. pr)])
 #ARG_OPTIONAL_SINGLE([config_file],[f],[YAML configuration file for workload parameters],[""])
@@ -29,7 +39,7 @@ die()
 # This is required in order to support getopts-like short options grouping.
 begins_with_short_option()
 {
-	local first_option all_short_options='bwfoisanmxy'
+	local first_option all_short_options='bwfoisranmxy'
 	first_option="${1:0:1}"
 	test "$all_short_options" = "${all_short_options/$first_option/}" && return 1 || return 0
 }
@@ -40,6 +50,7 @@ _arg_workload=
 _arg_config_file=""
 _arg_output_dir=""
 _arg_instrument=""
+_arg_iterations=1
 _arg_sampling_rate=5000
 _arg_aggregate_rate="100ms"
 _arg_min_damon=""
@@ -53,12 +64,13 @@ _arg_auto_aggrs=""
 # and it makes sense to remind the user how the script is supposed to be called.
 print_help()
 {
-	printf 'Usage: %s [-b|--suite <arg>] [-w|--workload <arg>] [-f|--config_file <arg>] [-o|--output_dir <arg>] [-i|--instrument <arg>] [-s|--sampling_rate <arg>] [-a|--aggregate_rate <arg>] [-n|--min_damon <arg>] [-m|--max_damon <arg>] [-x|--auto_access_bp <arg>] [-y|--auto_aggrs <arg>]\n' "$0"
+	printf 'Usage: %s [-b|--suite <arg>] [-w|--workload <arg>] [-f|--config_file <arg>] [-o|--output_dir <arg>] [-i|--instrument <arg>] [-r|--iterations <arg>] [-s|--sampling_rate <arg>] [-a|--aggregate_rate <arg>] [-n|--min_damon <arg>] [-m|--max_damon <arg>] [-x|--auto_access_bp <arg>] [-y|--auto_aggrs <arg>]\n' "$0"
 	printf '\t%s\n' "-b, --suite: Benchmark suite (e.g. gapbs) (no default)"
 	printf '\t%s\n' "-w, --workload: Name of the workload to run (e.g. pr) (no default)"
 	printf '\t%s\n' "-f, --config_file: YAML configuration file for workload parameters (default: '""')"
 	printf '\t%s\n' "-o, --output_dir: Output directory (default: '""')"
 	printf '\t%s\n' "-i, --instrument: Instrumentation tool: 'pebs', 'damon' (default: none) (default: '"none"')"
+	printf '\t%s\n' "-r, --iterations: Number of iterations to run (default: 1) (default: '1')"
 	printf '\t%s\n' "-s, --sampling_rate: Damon Sampling Rate (microseconds) or PEBS event threshold, default: 5000 (default: '5000')"
 	printf '\t%s\n' "-a, --aggregate_rate: Damon Aggregate Rate (milliseconds), default: 100 (default: '100')"
 	printf '\t%s\n' "-n, --min_damon: Min # of Damon regions (default: '""')"
@@ -153,6 +165,20 @@ parse_commandline()
 			# See the comment of option '-b' to see what's going on here - principle is the same.
 			-i*)
 				_arg_instrument="${_key##-i}"
+				;;
+			# See the comment of option '--suite' to see what's going on here - principle is the same.
+			-r|--iterations)
+				test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+				_arg_iterations="$2"
+				shift
+				;;
+			# See the comment of option '--suite=' to see what's going on here - principle is the same.
+			--iterations=*)
+				_arg_iterations="${_key##--iterations=}"
+				;;
+			# See the comment of option '-b' to see what's going on here - principle is the same.
+			-r*)
+				_arg_iterations="${_key##-r}"
 				;;
 			# See the comment of option '--suite' to see what's going on here - principle is the same.
 			-s|--sampling_rate)

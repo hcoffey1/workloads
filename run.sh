@@ -5,12 +5,18 @@
 # ==============================================================================
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
+#set -x
+#PS4='${LINENO}: '
+
+#set -eE -o pipefail
+trap 'echo "ERR: command \"$BASH_COMMAND\" failed at ${BASH_SOURCE}:${LINENO}" >&2' ERR
+
 
 # ==============================================================================
 # GLOBAL VARIABLES
 # ==============================================================================
 declare -g CUR_PATH DAMO_PATH PEBS_PATH PEBS_PIPE
-declare -g SUITE WORKLOAD CONFIG_FILE INSTRUMENT OUTPUT_DIR
+declare -g SUITE WORKLOAD CONFIG_FILE INSTRUMENT OUTPUT_DIR ITERATIONS
 declare -g SAMPLING_RATE AGG_RATE MIN_NUM_DAMO MAX_NUM_DAMO
 declare -g DAMON_AUTO_ACCESS_BP DAMON_AUTO_AGGRS
 declare -g hemem_policy workload_pid
@@ -32,6 +38,7 @@ REQUIRED:
 OPTIONAL:
   -f config_file.yaml        YAML configuration file for workload parameters
   -i instrumentation         Instrumentation tool: 'pebs', 'damon' (default: none)
+  -r iterations              Number of iterations to run (default: 1)
   -s sampling_rate           Damon Sampling Rate in microseconds (default: 5000)
   -a aggregate_rate          Damon Aggregate Rate in milliseconds (default: 100)
   -n min_regions             Min number of Damon regions
@@ -42,6 +49,7 @@ OPTIONAL:
 EXAMPLES:
   $0 -b graph500 -w graph500 -o results/baseline
   $0 -b gapbs -w bfs -o results/test -i damon -s 1000 -a 50
+  $0 -b xsbench -w xsbench -o results/multi -r 5  # Run 5 iterations
 EOF
     exit 1
 }
@@ -57,6 +65,24 @@ extract_policy() {
     esac
 }
 
+# Generate output filename with iteration number
+generate_output_filename() {
+    local base_name="$1"
+    local extension="$2"
+    local filename="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}"
+
+    if [[ -n "$CURRENT_ITERATION" ]]; then
+        filename+="_iter${CURRENT_ITERATION}"
+    fi
+
+    if [[ -n "$base_name" ]]; then
+        filename+="_${base_name}"
+    fi
+
+    filename+=".${extension}"
+    echo "$filename"
+}
+
 # Print configuration for debugging
 print_config() {
     cat << EOF
@@ -66,6 +92,7 @@ Workload:        $WORKLOAD
 Output Dir:      $OUTPUT_DIR
 Config File:     ${CONFIG_FILE:-"(none)"}
 Instrumentation: ${INSTRUMENT:-"(none)"}
+Iterations:      $ITERATIONS
 Hemem Policy:    $hemem_policy
 ==================================
 EOF
@@ -164,6 +191,11 @@ generate_damo_filename() {
         base+="_${DAMON_AUTO_ACCESS_BP}bp_${DAMON_AUTO_AGGRS}agg"
     fi
 
+    # Add iteration number
+    if [[ -n "$CURRENT_ITERATION" ]]; then
+        base+="_iter${CURRENT_ITERATION}"
+    fi
+
     echo "${base}_damon.dat"
 }
 
@@ -252,7 +284,12 @@ cleanup_workload() {
 run_with_pebs() {
     sys_init
 
-    local pebs_output="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${SAMPLING_RATE}_samples.dat"
+    local pebs_output="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${SAMPLING_RATE}"
+    if [[ -n "$CURRENT_ITERATION" ]]; then
+        pebs_output+="_iter${CURRENT_ITERATION}"
+    fi
+    pebs_output+="_samples.dat"
+
     start_pebs "$pebs_output" "$SAMPLING_RATE"
 
     run_workload
@@ -327,6 +364,7 @@ main() {
     CONFIG_FILE="$_arg_config_file"
     INSTRUMENT="$_arg_instrument"
     OUTPUT_DIR="$_arg_output_dir"
+    ITERATIONS="$_arg_iterations"
     SAMPLING_RATE="$_arg_sampling_rate"
     AGG_RATE="$_arg_aggregate_rate"
     MIN_NUM_DAMO="$_arg_min_damon"
@@ -350,26 +388,41 @@ main() {
     print_config
     setup_workload
 
-    # Run with appropriate instrumentation
-    case "$INSTRUMENT" in
-        "pebs")
-            echo "=== Running with PEBS instrumentation ==="
-            run_with_pebs
-            ;;
-        "damon")
-            echo "=== Running with DAMON instrumentation ==="
-            run_with_damon
-            ;;
-        ""|"none")
-            echo "=== Running without instrumentation ==="
-            run_without_instrumentation
-            ;;
-        *)
-            echo "ERROR: Unknown instrumentation option '$INSTRUMENT'"
-            echo "Valid options: 'pebs', 'damon', or leave empty for none"
-            exit 1
-            ;;
-    esac
+    # Run iterations
+    for ((iteration=0; iteration<ITERATIONS; iteration++)); do
+        echo "=== Running iteration $iteration of $ITERATIONS ==="
+
+        # Export current iteration for workload scripts to use
+        export CURRENT_ITERATION=$iteration
+
+        # Run with appropriate instrumentation
+        case "$INSTRUMENT" in
+            "pebs")
+                echo "=== Running with PEBS instrumentation ==="
+                run_with_pebs
+                ;;
+            "damon")
+                echo "=== Running with DAMON instrumentation ==="
+                run_with_damon
+                ;;
+            ""|"none")
+                echo "=== Running without instrumentation ==="
+                run_without_instrumentation
+                ;;
+            *)
+                echo "ERROR: Unknown instrumentation option '$INSTRUMENT'"
+                echo "Valid options: 'pebs', 'damon', or leave empty for none"
+                exit 1
+                ;;
+        esac
+
+        echo "=== Iteration $iteration completed ==="
+
+        # Add a short delay between iterations to ensure clean separation
+        if [[ $iteration -lt $((ITERATIONS-1)) ]]; then
+            sleep 2
+        fi
+    done
 
     # Cleanup
     cleanup_workload

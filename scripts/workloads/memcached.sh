@@ -1,5 +1,9 @@
 
 #!/bin/bash
+
+# Source workload utilities
+source "$CUR_PATH/scripts/workload_utils.sh"
+
 set -x
 config_memcached(){
     client_threads=16
@@ -44,11 +48,11 @@ run_memcached(){
     sleep 5
 
     # RUN: Record performance
-    # paths / names
-    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
-    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
-    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
-    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
+    # Generate filenames using utility function
+    local filenames
+    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
+    eval "$filenames"
+    
     WRAPPER="${OUTPUT_DIR}/run_memcached_${workload}.sh"
 
     # create wrapper for YCSB client (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
@@ -66,8 +70,8 @@ exec ./bin/ycsb run memcached -s -P "$CUR_PATH/YCSB/workloads/workloada" \\
 EOF
     chmod +x "$WRAPPER"
 
-    # run under numactl; time measures the wrapper -> execed ycsb
-    /usr/bin/time -v -o "$TIMEFILE" \
+    # run under numactl on NUMA node 1; time measures the wrapper -> execed ycsb
+    sudo /usr/bin/time -v -o "$TIMEFILE" \
         numactl --cpunodebind=1 --membind=1 \
         "$WRAPPER" \
         1> "$STDOUT" 2> "$STDERR" &

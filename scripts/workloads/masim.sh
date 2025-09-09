@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Source workload utilities
+source "$CUR_PATH/scripts/workload_utils.sh"
+
 config_masim(){
     return
 }
@@ -10,11 +13,12 @@ build_masim(){
 
 run_masim(){
     local workload=$1
-    # paths / names
-    TIMEFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_time.txt"
-    STDOUT="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stdout.txt"
-    STDERR="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_stderr.txt"
-    PIDFILE="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}.pid"
+    
+    # Generate filenames using utility function
+    local filenames
+    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
+    eval "$filenames"
+    
     WRAPPER="${OUTPUT_DIR}/run_masim_${workload}.sh"
 
     # create wrapper (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
@@ -28,7 +32,7 @@ exec "$CUR_PATH/masim/$workload" "$CUR_PATH/masim/configs/hc.cfg" -c 2
 EOF
     chmod +x "$WRAPPER"
 
-    # run with taskset; time measures the wrapper -> execed masim
+    # run with taskset (masim doesn't need sudo or NUMA binding); time measures the wrapper -> execed masim
     /usr/bin/time -v -o "$TIMEFILE" \
         taskset 0xFF \
         "$WRAPPER" \
