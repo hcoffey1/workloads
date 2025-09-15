@@ -34,7 +34,7 @@ run_cachelib(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/CacheLib/opt/cachelib/bin/cachebench" "--json_test_config \"$cachelib_json\""
 
     # Use standard workload execution
-    run_workload_standard "$WRAPPER"
+    run_workload_standard "--cpunodebind=0 --membind=0"
 }
 
 run_strace_cachelib(){

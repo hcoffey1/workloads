@@ -24,7 +24,7 @@ run_flexkvs(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/flexkvs/kvsbench" "-t \"$num_threads\" -T \"$run_time\" -w \"$warmup_time\" -h 0.25 127.0.0.1:1211 -S \"$kv_size\""
 
     # Use standard workload execution
-    run_workload_standard "$WRAPPER"
+    run_workload_standard "--cpunodebind=0 --membind=0"
 }
 
 run_strace_flexkvs(){

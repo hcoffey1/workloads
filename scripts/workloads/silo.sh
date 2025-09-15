@@ -24,7 +24,7 @@ run_silo(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/silo/silo/out-perf.masstree/benchmarks/dbtest" "--verbose --bench \"$benchmark\" --scale-factor \"$sf\" --ops-per-worker \"$ops\" --num-threads \"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "$WRAPPER"
+    run_workload_standard "--cpunodebind=0 --membind=0"
 }
 
 run_strace_silo(){

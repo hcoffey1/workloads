@@ -27,7 +27,7 @@ run_cloverleaf(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$WORK_DIR/clover_leaf" "" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "$WRAPPER"
+    run_workload_standard "--cpunodebind=0 --membind=0"
 
     # BW Monitoring
     sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 \
