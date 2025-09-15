@@ -28,12 +28,8 @@ run_cachelib(){
     local workload=$1
     
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames "$workload"
     
-    WRAPPER="${OUTPUT_DIR}/run_cachelib_${workload}.sh"
-
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/CacheLib/opt/cachelib/bin/cachebench" "--json_test_config \"$cachelib_json\""
 

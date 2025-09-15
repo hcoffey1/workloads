@@ -18,12 +18,8 @@ run_flexkvs(){
     local workload=$1
     
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames "$workload"
     
-    WRAPPER="${OUTPUT_DIR}/run_flexkvs_${workload}.sh"
-
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/flexkvs/kvsbench" "-t \"$num_threads\" -T \"$run_time\" -w \"$warmup_time\" -h 0.25 127.0.0.1:1211 -S \"$kv_size\""
 

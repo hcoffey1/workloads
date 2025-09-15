@@ -21,12 +21,8 @@ run_cloverleaf(){
     local workload=$1
     
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames "$workload"
     
-    WRAPPER="${OUTPUT_DIR}/run_cloverleaf_${workload}.sh"
-
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$WORK_DIR/clover_leaf" "" "export OMP_NUM_THREADS=\"$num_threads\""
 

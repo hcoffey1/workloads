@@ -49,12 +49,8 @@ run_memcached(){
 
     # RUN: Record performance
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames "$workload"
     
-    WRAPPER="${OUTPUT_DIR}/run_memcached_${workload}.sh"
-
     # create wrapper for YCSB client (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
     cat > "$WRAPPER" <<EOF
 #!/bin/sh

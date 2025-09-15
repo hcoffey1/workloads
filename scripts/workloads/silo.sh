@@ -18,12 +18,8 @@ run_silo(){
     local workload="silo"
     
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames $workload 
     
-    WRAPPER="${OUTPUT_DIR}/run_silo_${WORKLOAD}.sh"
-
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/silo/silo/out-perf.masstree/benchmarks/dbtest" "--verbose --bench \"$benchmark\" --scale-factor \"$sf\" --ops-per-worker \"$ops\" --num-threads \"$num_threads\""
 

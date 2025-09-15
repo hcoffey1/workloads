@@ -16,12 +16,8 @@ run_merci(){
     local workload=$1
     
     # Generate filenames using utility function
-    local filenames
-    filenames=$(generate_workload_filenames "$SUITE" "$WORKLOAD" "$hemem_policy" "$DRAMSIZE" "$OUTPUT_DIR")
-    eval "$filenames"
+    generate_workload_filenames "$workload"
     
-    WRAPPER="${OUTPUT_DIR}/run_merci_${workload}.sh"
-
     # Create wrapper using utility function (with custom HOME environment variable)
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/MERCI/4_performance_evaluation/bin/eval_baseline" "--dataset amazon_All -r \"$num_reps\" -c \"$num_threads\"" "export HOME=\"$CUR_PATH\""
 
