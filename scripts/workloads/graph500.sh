@@ -12,8 +12,6 @@ config_graph500(){
 build_graph500(){
     pushd $CUR_PATH/graph500 > /dev/null
 
-    git checkout master
-
     cp make-incs/make.inc-gcc make.inc
 
     #Change makefile gcc version and enable openmp

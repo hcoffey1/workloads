@@ -31,6 +31,7 @@ cd ..
 # graph_500
 cd graph500
 #git apply ../patches/graph500.patch
+git checkout master
 cd src
 make -j20
 cd ../..
