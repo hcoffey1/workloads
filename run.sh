@@ -340,8 +340,19 @@ run_without_instrumentation() {
 # ==============================================================================
 
 main() {
+    # Initialize global variables
+    CUR_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    DAMO_PATH="$CUR_PATH/scripts/damo"
+    PEBS_PATH="$CUR_PATH/scripts/PEBS_page_tracking"
+    PEBS_PIPE="/tmp/pebs_pipe"
+
+    # HeMem env variables, set to '' if not defined.
+    : "${DRAMSIZE:=}"
+    : "${HEMEMPOL:=}"
+    : "${MIN_INTERPOSE_MEM_SIZE:=}"
+
     # Parse arguments
-    . ./scripts/parse_args.sh "$@"
+    . $CUR_PATH/scripts/parse_args.sh "$@"
     print_cmd_args
 
     # Validate required arguments
@@ -349,12 +360,6 @@ main() {
         echo "ERROR: Required arguments missing"
         usage
     fi
-
-    # Initialize global variables
-    CUR_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-    DAMO_PATH="$CUR_PATH/scripts/damo"
-    PEBS_PATH="$CUR_PATH/scripts/PEBS_page_tracking"
-    PEBS_PIPE="/tmp/pebs_pipe"
 
     export PATH="$DAMO_PATH:$PATH"
 
