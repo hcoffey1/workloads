@@ -101,11 +101,23 @@ run_workload_standard() {
     fi
 
     set +e # Disable error code checking so we can use &
-    # run under numactl; time measures the wrapper -> execed binary
-    sudo numactl $numa_args \
-        /usr/bin/time -v -o "$TIMEFILE" \
-        "$WRAPPER" \
-        1> "$STDOUT" 2> "$STDERR" &
+    
+    # Check if VMA recording is enabled
+    if [[ "${VMA_RECORD:-0}" == "1" ]]; then
+        echo "Starting workload with VMA recording..."
+        # Run with record_vma.sh wrapper
+        sudo numactl $numa_args \
+            /usr/bin/time -v -o "$TIMEFILE" \
+            "$CUR_PATH/scripts/vma/record_vma.sh" "$OUTPUT_DIR" \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    else
+        # run under numactl; time measures the wrapper -> execed binary
+        sudo numactl $numa_args \
+            /usr/bin/time -v -o "$TIMEFILE" \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    fi
 
     # wait until wrapper has written pidfile (tiny loop is fine)
     local timeout=10  # 10 second timeout

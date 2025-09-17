@@ -67,10 +67,19 @@ EOF
     chmod +x "$WRAPPER"
 
     # run under numactl on NUMA node 1; time measures the wrapper -> execed ycsb
-    sudo /usr/bin/time -v -o "$TIMEFILE" \
-        numactl --cpunodebind=1 --membind=1 \
-        "$WRAPPER" \
-        1> "$STDOUT" 2> "$STDERR" &
+    if [[ "${VMA_RECORD:-0}" == "1" ]]; then
+        echo "Starting memcached with VMA recording..."
+        sudo /usr/bin/time -v -o "$TIMEFILE" \
+            numactl --cpunodebind=1 --membind=1 \
+            "$CUR_PATH/scripts/vma/record_vma.sh" "$OUTPUT_DIR" \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    else
+        sudo /usr/bin/time -v -o "$TIMEFILE" \
+            numactl --cpunodebind=1 --membind=1 \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    fi
 
     # wait until wrapper has written pidfile (tiny loop is fine)
     while [ ! -s "$PIDFILE" ]; do sleep 0.01; done

@@ -1,5 +1,6 @@
 import pandas as pd
 import sys
+import os
 
 file_name = sys.argv[1]
 
@@ -27,5 +28,11 @@ df = df.sort_values(by=['start', 'end'])
 df['start'] = df['start'].apply(lambda x: hex(x))
 df['end'] = df['end'].apply(lambda x: hex(x))
 
+# Generate output filename
+base_name = os.path.splitext(os.path.basename(file_name))[0]
+dir_name = os.path.dirname(file_name)
+output_file = os.path.join(dir_name, base_name + "_smap_deduplicated.csv")
+
 # Write to a new CSV
-df.to_csv(file_name.split('.')[0] + "_smap_deduplicated.csv", index=False)
+df.to_csv(output_file, index=False)
+

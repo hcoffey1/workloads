@@ -29,10 +29,19 @@ EOF
     chmod +x "$WRAPPER"
 
     # run with taskset (masim doesn't need sudo or NUMA binding); time measures the wrapper -> execed masim
-    /usr/bin/time -v -o "$TIMEFILE" \
-        taskset 0xFF \
-        "$WRAPPER" \
-        1> "$STDOUT" 2> "$STDERR" &
+    if [[ "${VMA_RECORD:-0}" == "1" ]]; then
+        echo "Starting masim with VMA recording..."
+        /usr/bin/time -v -o "$TIMEFILE" \
+            taskset 0xFF \
+            "$CUR_PATH/scripts/vma/record_vma.sh" "$OUTPUT_DIR" \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    else
+        /usr/bin/time -v -o "$TIMEFILE" \
+            taskset 0xFF \
+            "$WRAPPER" \
+            1> "$STDOUT" 2> "$STDERR" &
+    fi
 
     # wait until wrapper has written pidfile (tiny loop is fine)
     while [ ! -s "$PIDFILE" ]; do sleep 0.01; done

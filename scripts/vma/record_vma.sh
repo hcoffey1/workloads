@@ -65,6 +65,10 @@ main() {
         exit 1
     fi
 
+    # Get the workloads project root directory
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    WORKLOADS_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+
     local OUTPUT_DIR=$1
     shift
 
@@ -93,7 +97,7 @@ main() {
         sleep "$interval"
     done
 
-    python ./scripts/vma/coalesce_smap.py $output_path
+    python "$WORKLOADS_ROOT/scripts/vma/coalesce_smap.py" "$output_path"
 
     #echo "Process $target_pid exited."
 }

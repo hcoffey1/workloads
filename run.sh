@@ -45,6 +45,7 @@ OPTIONAL:
   -m max_regions             Max number of Damon regions
   -x auto_access_bp          Damon auto access_bp parameter
   -y auto_aggrs              Damon auto aggregation parameter
+  --record-vma               Enable VMA recording using record_vma.sh
 
 EXAMPLES:
   $0 -b graph500 -w graph500 -o results/baseline
@@ -92,6 +93,7 @@ Workload:        $WORKLOAD
 Output Dir:      $OUTPUT_DIR
 Config File:     ${CONFIG_FILE:-"(none)"}
 Instrumentation: ${INSTRUMENT:-"(none)"}
+VMA Recording:   ${VMA_RECORD:-0}
 Iterations:      $ITERATIONS
 Hemem Policy:    $hemem_policy
 ==================================
@@ -339,6 +341,12 @@ run_without_instrumentation() {
 # MAIN FUNCTION
 # ==============================================================================
 
+# ==============================================================================
+# VMA RECORDING FLAG SUPPORT
+# ==============================================================================
+# Add --record-vma flag to optionally wrap workload execution with record_vma.sh
+# This flag is parsed and propagated to workload scripts via an environment variable.
+# When enabled, workloads are wrapped with: record_vma.sh $OUTPUT_DIR <original_command>
 main() {
     # Initialize global variables
     CUR_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -352,7 +360,18 @@ main() {
     : "${MIN_INTERPOSE_MEM_SIZE:=}"
 
     # Parse arguments
-    . $CUR_PATH/scripts/parse_args.sh "$@"
+    # Parse arguments, add --record-vma flag
+    RECORD_VMA=0
+    ARGS=()
+    for arg in "$@"; do
+        if [[ "$arg" == "--record-vma" ]]; then
+            RECORD_VMA=1
+        else
+            ARGS+=("$arg")
+        fi
+    done
+    export RECORD_VMA
+    . $CUR_PATH/scripts/parse_args.sh "${ARGS[@]}"
     print_cmd_args
 
     # Validate required arguments
@@ -392,6 +411,13 @@ main() {
 
     print_config
     setup_workload
+
+    if [[ "$RECORD_VMA" == "1" ]]; then
+        echo "[INFO] Running workload with VMA recording enabled."
+        export VMA_RECORD=1
+    else
+        export VMA_RECORD=0
+    fi
 
     # Run iterations
     for ((iteration=0; iteration<ITERATIONS; iteration++)); do
