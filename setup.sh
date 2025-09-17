@@ -32,9 +32,9 @@ cd ..
 cd graph500
 #git apply ../patches/graph500.patch
 git checkout master
-cd src
+#cd src
 make -j20
-cd ../..
+cd ..
 
 # liblinear
 cd liblinear-2.47
