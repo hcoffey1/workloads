@@ -181,6 +181,8 @@ def find_region_id(row, df2):
     #print(row)
     #time = row['time']
     addr = row['PageFrame']
+    if df2 is None:
+        return None  # No VMA filtering when df2 is None
     matches = df2[
             (df2['start'] <= addr) &
             (df2['end'] > addr)
@@ -603,7 +605,7 @@ def save_cluster_fig(file_name, df, feature):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("smap_file_path")
+    parser.add_argument("smap_file_path", nargs='?', default=None, help="Optional path to smap file for VMA filtering")
     parser.add_argument("pebs_file_path")
     parser.add_argument('--birch', default=False, action='store_true')
     parser.add_argument('--birch_model', type=str, default=None, help='Birch Model to use.')
@@ -643,16 +645,21 @@ if __name__ == "__main__":
         label_fig_output_file = base + "_" + str(N) + "_" + birch_name + "_" + str(group_size) + "_gs_" + "_no_pca_birch_cluster_label.png"
 
     # Read in VMA smap data. Really just used to filter out memory addresses we don't want to examine (libraries etc.)
-    vma_df = (pd.read_csv(smap_file))
+    if smap_file is not None:
+        vma_df = (pd.read_csv(smap_file))
 
-    next_rno = vma_df['rno'].max() + 1 # When we split up large regions, start indexing new rno from here.
+        next_rno = vma_df['rno'].max() + 1 # When we split up large regions, start indexing new rno from here.
 
-    vma_df['start'] = vma_df['start'].apply(lambda x: int(x,16))
-    vma_df['end'] = vma_df['end'].apply(lambda x: int(x,16))
-    print(vma_df)
+        vma_df['start'] = vma_df['start'].apply(lambda x: int(x,16))
+        vma_df['end'] = vma_df['end'].apply(lambda x: int(x,16))
+        print(vma_df)
 
-    # Get only vma with no pathname (anon region) and a size over 2 MB
-    filtered_vma_df = (vma_df[pd.isna(vma_df['pathname']) & (vma_df['size'] >= (1<<21))])
+        # Get only vma with no pathname (anon region) and a size over 2 MB
+        filtered_vma_df = (vma_df[pd.isna(vma_df['pathname']) & (vma_df['size'] >= (1<<21))])
+    else:
+        print("No smap file provided. Proceeding without VMA filtering.")
+        vma_df = None
+        filtered_vma_df = None
 
     # Not currently splitting large VMA into sub groups, so this function isn't used.
     def split_large_rows(df, next_rno, size_threshold=(1<<20)):
@@ -830,11 +837,14 @@ if __name__ == "__main__":
     print("filtering pages...")
     filter_s = time.time()
     # Filter out pages that aren't in the region we want to plot.
-    unique_pages = pd.DataFrame({'PageFrame': final_df['PageFrame'].unique()})
-    unique_pages['rno'] = unique_pages.apply(lambda row: find_region_id(row, filtered_vma_df), axis=1)
-    unique_pages = unique_pages.dropna().reset_index(drop=True)
+    if filtered_vma_df is not None:
+        unique_pages = pd.DataFrame({'PageFrame': final_df['PageFrame'].unique()})
+        unique_pages['rno'] = unique_pages.apply(lambda row: find_region_id(row, filtered_vma_df), axis=1)
+        unique_pages = unique_pages.dropna().reset_index(drop=True)
 
-    final_df = final_df[final_df['PageFrame'].isin(unique_pages['PageFrame'])]
+        final_df = final_df[final_df['PageFrame'].isin(unique_pages['PageFrame'])]
+    else:
+        print("No VMA filtering applied - using all pages")
     filter_e = time.time()
     print("Done filter {} s".format(filter_e - filter_s))
 
@@ -861,13 +871,14 @@ if __name__ == "__main__":
         #xmax = df['epoch'].max()
 
         # Draw a horizontal line at y = some_value
-        ymax = final_df['PageFrame'].max()
-        ymin = final_df['PageFrame'].min()
-        #plt.hlines(y=ymax, xmin=xmin, xmax=xmax, colors='red', linestyles='dashed')
-        #plt.hlines(y=ymin, xmin=xmin, xmax=xmax, colors='red', linestyles='dashed')
+        if not final_df.empty:
+            ymax = final_df['PageFrame'].max()
+            ymin = final_df['PageFrame'].min()
+            #plt.hlines(y=ymax, xmin=xmin, xmax=xmax, colors='red', linestyles='dashed')
+            #plt.hlines(y=ymin, xmin=xmin, xmax=xmax, colors='red', linestyles='dashed')
 
-        df = df[df['PageFrame'] >= ymin]
-        df = df[df['PageFrame'] <= ymax]
+            df = df[df['PageFrame'] >= ymin]
+            df = df[df['PageFrame'] <= ymax]
         # If we want to use plt instead of sns
         plt.scatter(df['epoch'], df['PageFrame'], c=df['value'], s=50, norm=LogNorm(), edgecolor='none', rasterized=True, alpha=0.7, marker='.')
 
