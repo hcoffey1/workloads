@@ -25,11 +25,8 @@ run_liblinear(){
     # Use standard workload execution
     run_workload_standard "--cpunodebind=0 --membind=0"
 
-    # BW monitoring #TODO is this causing errors when used with jobserver? Issue, needs to be built with setup script
-    # currently not being built so we get errors.
-    #sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 \
-    #    > ${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${hemem_policy}_${DRAMSIZE}_bwmon.txt &
-    #bwmon_pid=$!
+    # BW monitoring
+    start_bwmon
 }
 
 run_strace_liblinear(){
@@ -37,6 +34,6 @@ run_strace_liblinear(){
 }
 
 clean_liblinear(){
-    #sudo kill "$bwmon_pid"
+    stop_bwmon
     return
 }

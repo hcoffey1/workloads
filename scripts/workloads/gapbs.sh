@@ -27,6 +27,8 @@ run_gapbs(){
 
     # Use standard workload execution
     run_workload_standard "--cpunodebind=0 --membind=0"
+
+    start_bwmon
 }
 
 run_strace_gapbs(){
@@ -50,5 +52,6 @@ run_strace_gapbs(){
 }
 
 clean_gapbs(){
+    stop_bwmon
     return
 }

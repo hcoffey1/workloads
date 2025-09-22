@@ -21,6 +21,7 @@ generate_workload_filenames() {
     export TIMEFILE="${base_filename}_time.txt"
     export STDOUT="${base_filename}_stdout.txt"
     export STDERR="${base_filename}_stderr.txt"
+    export BWMON="${base_filename}_bwmon.txt"
     export PIDFILE="${base_filename}.pid"
     export WRAPPER="${OUTPUT_DIR}/run_${suite_name}_${workload_name}_iter${CURRENT_ITERATION:-0}.sh"
 }
@@ -160,6 +161,16 @@ execute_workload() {
 
     # Run workload
     run_workload_standard "$numa_args"
+}
+
+start_bwmon() {
+    sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 \
+        > $BWMON &
+    bwmon_pid=$!
+}
+
+stop_bwmon() {
+    sudo kill "$bwmon_pid"
 }
 
 # Print workload execution info for debugging
