@@ -9,6 +9,10 @@ sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich -y
 conda tos accept
 conda create -n dataVis pandas matplotlib seaborn -y
 
+pushd scripts/cipp-workspace/tools
+make -j 20
+popd
+
 # PEBS
 cd scripts/PEBS_page_tracking/
 git apply ../../patches/pebs.patch
