@@ -10,7 +10,8 @@ conda tos accept
 conda create -n dataVis pandas matplotlib seaborn -y
 
 pushd scripts/cipp-workspace/tools
-make -j 20
+make clean
+make ARCH=haswell -j 20
 popd
 
 # PEBS

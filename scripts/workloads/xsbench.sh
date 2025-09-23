@@ -27,6 +27,7 @@ run_xsbench(){
     
     # Run with standard execution
     run_workload_standard "--cpunodebind=0 --membind=0"
+    start_bwmon
 }
 
 run_strace_xsbench(){
@@ -35,5 +36,6 @@ run_strace_xsbench(){
 }
 
 clean_xsbench(){
+    stop_bwmon
     return
 }

@@ -25,6 +25,8 @@ run_silo(){
 
     # Use standard workload execution
     run_workload_standard "--cpunodebind=0 --membind=0"
+
+    start_bwmon
 }
 
 run_strace_silo(){
@@ -32,5 +34,6 @@ run_strace_silo(){
 }
 
 clean_silo(){
+    stop_bwmon
     return
 }

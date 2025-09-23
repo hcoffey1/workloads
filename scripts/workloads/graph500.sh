@@ -41,6 +41,8 @@ export OMP_NUM_THREADS=\"$num_threads\""
     
     # Run with standard execution
     run_workload_standard "--cpunodebind=0 --membind=0"
+
+    start_bwmon
 }
 
 run_strace_graph500(){
@@ -49,5 +51,6 @@ run_strace_graph500(){
 }
 
 clean_graph500(){
+    stop_bwmon
     return
 }
