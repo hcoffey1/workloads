@@ -410,7 +410,6 @@ main() {
     validate_workload_script "$suite_script"
 
     print_config
-    setup_workload
 
     if [[ "$RECORD_VMA" == "1" ]]; then
         echo "[INFO] Running workload with VMA recording enabled."
@@ -422,6 +421,7 @@ main() {
     # Run iterations
     for ((iteration=0; iteration<ITERATIONS; iteration++)); do
         echo "=== Running iteration $iteration of $ITERATIONS ==="
+        setup_workload
 
         # Export current iteration for workload scripts to use
         export CURRENT_ITERATION=$iteration
@@ -448,6 +448,8 @@ main() {
         esac
 
         echo "=== Iteration $iteration completed ==="
+        # Cleanup
+        cleanup_workload
 
         # Add a short delay between iterations to ensure clean separation
         if [[ $iteration -lt $((ITERATIONS-1)) ]]; then
@@ -455,8 +457,6 @@ main() {
         fi
     done
 
-    # Cleanup
-    cleanup_workload
     echo "=== Experiment completed successfully ==="
 }
 

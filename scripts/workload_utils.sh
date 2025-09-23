@@ -164,13 +164,16 @@ execute_workload() {
 }
 
 start_bwmon() {
-    sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 \
-        > $BWMON &
-    bwmon_pid=$!
+    sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 > "$BWMON" &
+    sleep 1
+
 }
 
 stop_bwmon() {
-    sudo kill "$bwmon_pid"
+    # Trying to kill individual pid not working.
+    set -x
+    sudo killall bwmon
+    set +x
 }
 
 # Print workload execution info for debugging
