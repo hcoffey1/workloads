@@ -4,37 +4,48 @@
 #DRAM_SIZES=(4294967296)
 #HEMEM_POL=(/mydata/hemem/src/libhemem.so)
 #MIN_INTERPOSE_MEM_SIZE=33554432
-MIN_INTERPOSE_MEM_SIZE=67108864
+#MIN_INTERPOSE_MEM_SIZE=16777216
+MIN_INTERPOSE_MEM_SIZE=$((32*1024))
+
+#MIN_INTERPOSE_MEM_SIZE=67108864
 DRAM_SIZES=(2147483648)
-HEMEM_POL=(/mydata/hemem/src/libhemem.so /mydata/hemem/src/libhemem-lru.so /mydata/hemem/src/libhemem-baseline.so)
+HEMEM_POL=(~/arms/src/libhemem-runtime.so)
 N=0
-for i in $(seq 1 $N); do
+for i in $(seq 0 $N); do
     for size in "${DRAM_SIZES[@]}"; do
         for pol in "${HEMEM_POL[@]}"; do
+           #HEMEM_REGIONS="0x7fff1f800000-0x7fff97800000:lru" HEMEM_REGIONS_PHYS="lru:1G:8G" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b merci -w merci -o results/results_dual_policy_lru_${i}
+           #HEMEM_REGIONS="0x555555400000-0x7fff1f600000:lru,0x7fff1f800000-0x7fff97800000:hemem" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b merci -w merci -o results/results_dual_policy_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b xsbench -w xsbench -o results/results_freq_lru_${i}
+           HEMEM_POLICY="lfu" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b merci -w merci -o results/results_freq_${i}
+           #HEMEM_POLICY="lru" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b merci -w merci -o results/results_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b silo -w silo -o results/results_freq_lru_${i}
+           #HEMEM_POLICY="lfu" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bc -o results/results_freq_${i}
+           #HEMEM_POLICY="lru" MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bc -o results/results_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b liblinear -w liblinear -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b xsbench -w xsbench -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b flexkvs -w flexkvs -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b silo -w silo -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b graph500 -w graph500 -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b liblinear -w liblinear -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bc -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b flexkvs -w flexkvs -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w pr -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b graph500 -w graph500 -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w pr_spmv -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bc -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w cc -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w pr -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w cc_sv -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w pr_spmv -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bfs -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w cc -o results/results_freq_lru_${i}
 
-           MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w sssp -o results/results_freq_lru_${i}
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w cc_sv -o results/results_freq_lru_${i}
+
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w bfs -o results/results_freq_lru_${i}
+
+           #MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE HEMEMPOL=$pol DRAMSIZE=$size ./run.sh -b gapbs -w sssp -o results/results_freq_lru_${i}
 
             # ======================
             # gapbs tc takes too long (~2 hours per run)
@@ -46,6 +57,7 @@ for i in $(seq 1 $N); do
         done
     done
 done
+exit
 
 cloverleaf_peak=$((9154748*1024))
 

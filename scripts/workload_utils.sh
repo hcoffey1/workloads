@@ -63,7 +63,7 @@ create_workload_wrapper() {
 echo \$\$ > "$PIDFILE"
 
 # env only for the workload (time is not affected)
-export LD_PRELOAD="$HEMEMPOL"
+export LD_PRELOAD="/users/hjcoffey/arms/Hoard/src/libhoard.so:$HEMEMPOL"
 export DRAMSIZE="$DRAMSIZE"
 export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
 EOF
