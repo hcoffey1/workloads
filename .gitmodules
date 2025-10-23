@@ -30,7 +30,7 @@
 	url = https://github.com/brianfrankcooper/YCSB.git
 [submodule "scripts/PEBS_page_tracking"]
 	path = scripts/PEBS_page_tracking
-	url = https://github.com/SujayYadalam94/PEBS_page_tracking.git
+	url = https://github.com/hcoffey1/PEBS_page_tracking.git
 [submodule "scripts/damo"]
 	path = scripts/damo
 	url = https://github.com/damonitor/damo.git
@@ -39,7 +39,7 @@
 	url = https://github.com/hcoffey1/CacheLib.git
 [submodule "scripts/cipp-workspace"]
 	path = scripts/cipp-workspace
-	url = https://github.com/BijanT/cipp-workspace.git
+	url = https://github.com/hcoffey1/cipp-workspace.git
 [submodule "CloverLeaf"]
 	path = CloverLeaf
 	url = https://github.com/UK-MAC/CloverLeaf.git
