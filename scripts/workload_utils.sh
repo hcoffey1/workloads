@@ -56,6 +56,7 @@ create_workload_wrapper() {
     #    pidfile_path="$(pwd)/$pidfile_path"
     #fi
 
+#export LD_PRELOAD="/users/hjcoffey/arms/Hoard/src/libhoard.so:$HEMEMPOL"
     # Create wrapper script
     cat > "$wrapper_path" <<EOF
 #!/bin/sh
@@ -63,7 +64,7 @@ create_workload_wrapper() {
 echo \$\$ > "$PIDFILE"
 
 # env only for the workload (time is not affected)
-export LD_PRELOAD="/users/hjcoffey/arms/Hoard/src/libhoard.so:$HEMEMPOL"
+export LD_PRELOAD="/users/hjcoffey/arms/jemalloc/lib/libjemalloc.so:$HEMEMPOL"
 export DRAMSIZE="$DRAMSIZE"
 export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
 EOF
@@ -102,7 +103,7 @@ run_workload_standard() {
     fi
 
     set +e # Disable error code checking so we can use &
-    
+
     # Check if VMA recording is enabled
     if [[ "${VMA_RECORD:-0}" == "1" ]]; then
         echo "Starting workload with VMA recording..."

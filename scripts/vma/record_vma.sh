@@ -97,6 +97,11 @@ main() {
         sleep "$interval"
     done
 
+    # Initialize and activate conda environment for Python script
+    # Source conda.sh to make conda command available
+    eval "$(/users/hjcoffey/miniconda3/bin/conda shell.bash hook)"
+    conda activate dataVis
+    
     python "$WORKLOADS_ROOT/scripts/vma/coalesce_smap.py" "$output_path"
 
     #echo "Process $target_pid exited."
