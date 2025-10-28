@@ -31,7 +31,7 @@ create_workload_wrapper() {
     local wrapper_path="$1"
     local pidfile_path="$2"
     local binary_path="$3"
-    local binary_args="$4"
+    local binary_args="${4:-}"
     local extra_env_vars="${5:-}"  # Optional extra environment variables
 
     # Validate required parameters

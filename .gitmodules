@@ -43,3 +43,6 @@
 [submodule "CloverLeaf"]
 	path = CloverLeaf
 	url = https://github.com/UK-MAC/CloverLeaf.git
+[submodule "NPB-CPP"]
+	path = NPB-CPP
+	url = https://github.com/GMAP/NPB-CPP.git
