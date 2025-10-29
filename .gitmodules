@@ -46,3 +46,9 @@
 [submodule "NPB-CPP"]
 	path = NPB-CPP
 	url = https://github.com/GMAP/NPB-CPP.git
+[submodule "minimap2"]
+	path = minimap2
+	url = https://github.com/lh3/minimap2.git
+[submodule "giab_data_indexes"]
+	path = giab_data_indexes
+	url = https://github.com/genome-in-a-bottle/giab_data_indexes.git

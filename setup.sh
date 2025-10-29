@@ -78,3 +78,14 @@ cd ../..
 cd XSBench/openmp-threading
 make -j20
 cd ../..
+
+#
+pushd ./NPB-CPP/libs/tbb-2020.1/
+# Build tbb library and make env source file executable.
+make -j 32
+chmod +x ./build/linux_intel64_gcc_cc11.4.0_libc2.35_kernel5.1.0_release/tbbvars.sh
+popd
+
+pushd ./minimap2
+git submodule update --init --recursive
+popd
