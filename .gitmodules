@@ -52,3 +52,6 @@
 [submodule "giab_data_indexes"]
 	path = giab_data_indexes
 	url = https://github.com/genome-in-a-bottle/giab_data_indexes.git
+[submodule "msCRUSH"]
+	path = msCRUSH
+	url = https://github.com/COL-IU/msCRUSH.git
