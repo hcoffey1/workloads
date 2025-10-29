@@ -50,6 +50,18 @@ prepare_mscrush_dataset() {
 
     echo "Generating scaled dataset ($copies copies of ${#base_files[@]} base files)" >&2
     local copy_index
+    local default_jobs
+    if command -v nproc >/dev/null 2>&1; then
+        default_jobs=$(nproc)
+    else
+        default_jobs=1
+    fi
+    local max_jobs="${MSCRUSH_SCALE_JOBS:-$default_jobs}"
+    if ! [[ "$max_jobs" =~ ^[0-9]+$ ]] || (( max_jobs < 1 )); then
+        max_jobs=1
+    fi
+    local -a active_pids=()
+
     for original in "${base_files[@]}"; do
         local base_name
         base_name=$(basename "$original" .mgf)
@@ -60,19 +72,29 @@ prepare_mscrush_dataset() {
             if [[ -f "$dest_file" ]]; then
                 continue
             fi
-            printf '  -> %-40s' "${base_name}_copy${suffix}.mgf" >&2
-            python3 - "$original" "$dest_file" "COPY${suffix}_" <<'PY'
-import sys
-src, dst, prefix = sys.argv[1:]
-with open(src, 'r', encoding='utf-8', errors='strict') as fin, open(dst, 'w', encoding='utf-8') as fout:
-    for line in fin:
-        if line.startswith('TITLE='):
-            fout.write('TITLE=' + prefix + line[6:])
-        else:
-            fout.write(line)
-PY
-            echo " done" >&2
+            #printf '  -> %-40s' "${base_name}_copy${suffix}.mgf" >&2
+            (
+                cp "$original" "$dest_file"
+                LC_ALL=C sed -i "s/^TITLE=/TITLE=COPY${suffix}_/" "$dest_file"
+                #echo " done" >&2
+            ) &
+            active_pids+=($!)
+            if (( ${#active_pids[@]} >= max_jobs )); then
+                if ! wait "${active_pids[0]}"; then
+                    echo "Scaling copy job failed" >&2
+                    return 1
+                fi
+                active_pids=(${active_pids[@]:1})
+            fi
         done
+    done
+
+    local pid
+    for pid in "${active_pids[@]}"; do
+        if ! wait "$pid"; then
+            echo "Scaling copy job failed" >&2
+            return 1
+        fi
     done
 
     local generated_total
@@ -140,13 +162,13 @@ config_mscrush(){
                     copy_count=5   # ~1.8 GB
                     ;;
                 "medium")
-                    copy_count=12  # ~4.5 GB
+                    copy_count=27  # ~10 GB
                     ;;
                 "large")
-                    copy_count=24  # ~9 GB
+                    copy_count=54  # ~20 GB
                     ;;
                 "xlarge")
-                    copy_count=40  # ~15 GB
+                    copy_count=108 # ~40 GB
                     ;;
                 *)
                     echo "ERROR: Unknown MSCRUSH_SIZE '$MSCRUSH_SIZE'" >&2
