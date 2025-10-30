@@ -89,3 +89,6 @@ popd
 pushd ./minimap2
 git submodule update --init --recursive
 popd
+
+# For solo-ann
+sudo apt update && sudo apt install -y python3.10-venv python3.10-dev

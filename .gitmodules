@@ -55,3 +55,6 @@
 [submodule "msCRUSH"]
 	path = msCRUSH
 	url = https://github.com/COL-IU/msCRUSH.git
+[submodule "ANN-SoLo"]
+	path = ANN-SoLo
+	url = https://github.com/bittremieux-lab/ANN-SoLo.git
