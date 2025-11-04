@@ -40,7 +40,6 @@ prepare_ann_solo_dataset() {
             ;;
         medium)
             # Target ~10-15 GB: 512K spectra library
-            # Takes ~2 hours
             library_count=524288
             query_multiplier=1
             ;;

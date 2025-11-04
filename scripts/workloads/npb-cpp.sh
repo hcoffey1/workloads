@@ -8,7 +8,7 @@ config_npb-cpp(){
     # Set TBB paths for later use
     export TBB_ROOT="$CUR_PATH/NPB-CPP/libs/tbb-2020.1"
     export TBB_BIN="$TBB_ROOT/build/linux_intel64_gcc_cc11.4.0_libc2.35_kernel5.1.0_release"
-    
+
     pushd $TBB_ROOT
     make -j $(nproc)
     popd
@@ -17,7 +17,7 @@ config_npb-cpp(){
     source $TBB_BIN/tbbvars.sh
     set -u
 
-    NPB_CLASS=C
+    NPB_CLASS=D
 }
 
 build_npb-cpp(){
