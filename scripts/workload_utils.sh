@@ -57,6 +57,7 @@ create_workload_wrapper() {
     #fi
 
 #export LD_PRELOAD="/users/hjcoffey/arms/Hoard/src/libhoard.so:$HEMEMPOL"
+#export LD_PRELOAD="/users/hjcoffey/arms/jemalloc/lib/libjemalloc.so:$HEMEMPOL"
     # Create wrapper script
     cat > "$wrapper_path" <<EOF
 #!/bin/sh
@@ -64,7 +65,7 @@ create_workload_wrapper() {
 echo \$\$ > "$PIDFILE"
 
 # env only for the workload (time is not affected)
-export LD_PRELOAD="/users/hjcoffey/arms/jemalloc/lib/libjemalloc.so:$HEMEMPOL"
+export LD_PRELOAD="$SYS_ALLOC:$HEMEMPOL"
 export DRAMSIZE="$DRAMSIZE"
 export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
 EOF
