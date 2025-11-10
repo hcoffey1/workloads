@@ -396,6 +396,11 @@ main() {
     DAMON_AUTO_ACCESS_BP="$_arg_auto_access_bp"
     DAMON_AUTO_AGGRS="$_arg_auto_aggrs"
 
+    # Convert OUTPUT_DIR to absolute path if relative
+    if [[ ! "$OUTPUT_DIR" = /* ]]; then
+        OUTPUT_DIR="$CUR_PATH/$OUTPUT_DIR"
+    fi
+
     # Extract policy and set up directories
     hemem_policy=$(extract_policy "${HEMEMPOL:-}")
 

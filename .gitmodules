@@ -58,3 +58,6 @@
 [submodule "ANN-SoLo"]
 	path = ANN-SoLo
 	url = https://github.com/bittremieux-lab/ANN-SoLo.git
+[submodule "DCPerf"]
+	path = DCPerf
+	url = https://github.com/facebookresearch/DCPerf.git
