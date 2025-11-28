@@ -1,0 +1,17 @@
+diff --git a/silo/util.h b/silo/util.h
+index a63f7ae..f060280 100644
+--- a/silo/util.h
++++ b/silo/util.h
+@@ -21,6 +21,12 @@
+ #include "macros.h"
+ #include "small_vector.h"
+ 
++// Fix for handling pairs with newer versions of gcc
++inline std::ostream& operator<<(std::ostream& os, const std::pair<const std::string, unsigned long>& p) {
++  os << "[" << p.first << ", " << p.second << "]";
++  return os;
++}
++
+ namespace util {
+ 
+ // padded, aligned primitives

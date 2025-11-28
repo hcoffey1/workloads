@@ -1,0 +1,94 @@
+#!/bin/bash
+
+git submodule init
+git submodule update
+
+sudo apt update
+sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich -y
+
+conda tos accept
+conda create -n dataVis pandas matplotlib seaborn -y
+
+pushd scripts/cipp-workspace/tools
+make clean
+make ARCH=haswell -j 20
+popd
+
+# PEBS
+cd scripts/PEBS_page_tracking/
+git apply ../../patches/pebs.patch
+make -j20
+cd ../..
+
+# flexkvs
+cd flexkvs
+git apply ../patches/flexkvs.patch
+make -j20
+cd ..
+
+# GAPBS
+cd gapbs
+git apply ../patches/gapbs.patch
+make bench-graphs -j2
+make -j20
+cd ..
+
+# graph_500
+cd graph500
+#git apply ../patches/graph500.patch
+git checkout master
+#cd src
+make -j20
+cd ..
+
+# liblinear
+cd liblinear-2.47
+wget https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/kdd12.xz
+unxz kdd12.xz
+rm kdd12.xz
+make -j20
+cd ..
+
+# MERCI
+cd MERCI
+git apply ../patches/merci.patch
+mkdir -p data/4_filtered/amazon_All
+cd data/4_filtered/amazon_All
+wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/4_filtered/amazon_All/amazon_All_test_filtered.txt
+wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/4_filtered/amazon_All/amazon_All_train_filtered.txt
+cd ../../..
+mkdir -p data/5_patoh/amazon_All/partition_2748/
+cd data/5_patoh/amazon_All/partition_2748/
+wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/5_patoh/amazon_All/partition_2748/amazon_All_train_filtered.txt.part.2748
+cd ../../../..
+# now in merci
+cd 4_performance_evaluation/
+mkdir bin
+make -j20
+cd ../..
+# now in workloads
+
+# silo
+cd silo/silo
+git apply ../../patches/silo.patch
+make dbtest -j20
+cd ../..
+
+# XSBench
+cd XSBench/openmp-threading
+make -j20
+cd ../..
+
+#
+pushd ./NPB-CPP/libs/tbb-2020.1/
+# Build tbb library and make env source file executable.
+make -j 32
+chmod +x ./build/linux_intel64_gcc_cc11.4.0_libc2.35_kernel5.1.0_release/tbbvars.sh
+popd
+
+pushd ./minimap2
+git submodule update --init --recursive
+popd
+
+# For solo-ann
+sudo apt update && sudo apt install -y python3.10-venv python3.10-dev

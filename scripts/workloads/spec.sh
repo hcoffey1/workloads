@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Source workload utilities
+source "$CUR_PATH/scripts/workload_utils.sh"
+
+translate_workload(){
+    case "$1" in
+        "cactus")
+            echo "507.cactuBSSN_r"
+            ;;
+        "mcf")
+            echo "505.mcf_r"
+            ;;
+        "deepsjeng")
+            echo "531.deepsjeng_r"
+            ;;
+        *)
+            echo "$1"
+            ;;
+    esac
+}
+
+config_spec(){
+    SPEC_PATH=/mydata/spec/cpu2017/
+    WORK_SIZE="ref"
+}
+
+build_spec(){
+    spec_workload=$(translate_workload $1)
+    (cd $SPEC_PATH && source shrc && runcpu --config=try1 --action=build $spec_workload)
+}
+
+run_spec(){
+    local workload=$1
+
+    # Use utility functions to set up filenames
+    generate_workload_filenames "$workload"
+
+    # Define workload-specific parameters
+    local binary_path input_file_path
+
+    case "$workload" in
+        "cactus")
+            #spec_dir="507.cactuBSSN_r"
+            binary_path="$SPEC_PATH/benchspec/CPU/507.cactuBSSN_r/build/build_base_hayden-mytest-m64.0000/cactusBSSN_r"
+            input_file_path="$SPEC_PATH/benchspec/CPU/507.cactuBSSN_r/data/refrate/input/spec_ref.par"
+            ;;
+        "mcf")
+            #spec_dir="505.mcf_r"
+            binary_path="$SPEC_PATH/benchspec/CPU/505.mcf_r/build/build_base_hayden-mytest-m64.0000/mcf_r"
+            input_file_path="$SPEC_PATH/benchspec/CPU/505.mcf_r/data/refrate/input/inp.in"
+            ;;
+        "deepsjeng")
+            #spec_dir="531.deepsjeng_r"
+            binary_path="$SPEC_PATH/benchspec/CPU/531.deepsjeng_r/build/build_base_hayden-mytest-m64.0000/deepsjeng_r"
+            input_file_path="$SPEC_PATH/benchspec/CPU/531.deepsjeng_r/data/refrate/input/ref.txt"
+            ;;
+        *)
+            echo "ERROR: Unsupported SPEC workload '$workload'"
+            echo "Supported workloads: cactus, mcf, deepsjeng"
+            exit 1
+            ;;
+    esac
+
+    # Validate that the binary exists
+    if [[ ! -f "$binary_path" ]]; then
+        echo "ERROR: SPEC binary not found: $binary_path"
+        echo "Make sure SPEC has been built for workload: $workload"
+        exit 1
+    fi
+
+    # Validate that the input file exists
+    if [[ ! -f "$input_file_path" ]]; then
+        echo "ERROR: SPEC input file not found: $input_file_path"
+        echo "Make sure SPEC data is available for workload: $workload"
+        exit 1
+    fi
+
+    echo "Running SPEC workload: $workload"
+    echo "Binary: $binary_path"
+    echo "Input file: $input_file_path"
+
+    # Use utility function to create and run workload
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "\"$input_file_path\""
+    run_workload_standard "--cpunodebind=0 --membind=0"
+}
+
+run_strace_spec(){
+    return
+}
+
+clean_spec(){
+    return
+}

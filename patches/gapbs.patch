@@ -1,0 +1,13 @@
+diff --git a/benchmark/bench.mk b/benchmark/bench.mk
+index 23ac50b..9cdf8dc 100644
+--- a/benchmark/bench.mk
++++ b/benchmark/bench.mk
+@@ -9,7 +9,7 @@
+ GRAPH_DIR = benchmark/graphs
+ RAW_GRAPH_DIR = benchmark/graphs/raw
+ 
+-GRAPHS = twitter web road kron urand
++GRAPHS = twitter #web road kron urand
+ ALL_GRAPHS =\
+ 	$(addsuffix .sg, $(GRAPHS)) \
+ 	$(addsuffix .wsg, $(GRAPHS)) \

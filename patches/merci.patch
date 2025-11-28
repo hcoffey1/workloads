@@ -1,0 +1,45 @@
+diff --git a/MERCI/4_performance_evaluation/src/utils.h b/MERCI/4_performance_evaluation/src/utils.h
+index 2c6d707..9c0e7c5 100644
+--- a/MERCI/4_performance_evaluation/src/utils.h
++++ b/MERCI/4_performance_evaluation/src/utils.h
+@@ -21,6 +21,7 @@
+ #include <sys/stat.h>
+ #include <cassert>
+ #include <cstring>
++#include <array>
+ 
+ using namespace std;
+ using namespace std::chrono;
+@@ -87,16 +88,19 @@ void __attribute__((optimize("O2"))) cacheFlush() {
+     vector<array<float, 16>> myf(core_count);
+     for(size_t i=0; i<core_count; i++) {
+         for(int j=0; j<16; j++) {
+-            myf[i][j] = 0.0f;
++            //myf[i][j] = 0.0f;
++            myf[i].at(j) = 0.0f;
+         }
+     }
+     #pragma omp parallel for schedule(static)
+     for(size_t i = 0; i < bigger_than_cachesize; i++) {
+         int tid = omp_get_thread_num();
+-        myf[tid][0]+= p[i];
++        //myf[tid][0]+= p[i];
++        myf[tid].at(0)+= p[i];
+     }
+     for(size_t i=0; i<core_count; i++) {
+-        vval += myf[i][0];
++        // vval += myf[i][0];
++        vval += myf[i].at(0);
+     }
+     delete p;
+ }
+@@ -143,7 +147,8 @@ public:
+             }
+         }
+ 
+-        random_shuffle(query.begin(), query.end()); //random shuffle to scatter duplicate queries
++        //random_shuffle(query.begin(), query.end()); //random shuffle to scatter duplicate queries
++	std::shuffle(query.begin(), query.end(), std::mt19937(std::random_device()())); //random shuffle to scatter duplicate queries
+ 
+         cout << "================== QUERY INFO ==================" << endl;
+         cout << "# of Queries                   : " << query.size() << endl;

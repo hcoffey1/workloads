@@ -28,3 +28,36 @@
 [submodule "YCSB"]
 	path = YCSB
 	url = https://github.com/brianfrankcooper/YCSB.git
+[submodule "scripts/PEBS_page_tracking"]
+	path = scripts/PEBS_page_tracking
+	url = https://github.com/hcoffey1/PEBS_page_tracking.git
+[submodule "scripts/damo"]
+	path = scripts/damo
+	url = https://github.com/damonitor/damo.git
+[submodule "CacheLib"]
+	path = CacheLib
+	url = https://github.com/hcoffey1/CacheLib.git
+[submodule "scripts/cipp-workspace"]
+	path = scripts/cipp-workspace
+	url = https://github.com/hcoffey1/cipp-workspace.git
+[submodule "CloverLeaf"]
+	path = CloverLeaf
+	url = https://github.com/UK-MAC/CloverLeaf.git
+[submodule "NPB-CPP"]
+	path = NPB-CPP
+	url = https://github.com/GMAP/NPB-CPP.git
+[submodule "minimap2"]
+	path = minimap2
+	url = https://github.com/lh3/minimap2.git
+[submodule "giab_data_indexes"]
+	path = giab_data_indexes
+	url = https://github.com/genome-in-a-bottle/giab_data_indexes.git
+[submodule "msCRUSH"]
+	path = msCRUSH
+	url = https://github.com/COL-IU/msCRUSH.git
+[submodule "ANN-SoLo"]
+	path = ANN-SoLo
+	url = https://github.com/bittremieux-lab/ANN-SoLo.git
+[submodule "DCPerf"]
+	path = DCPerf
+	url = https://github.com/facebookresearch/DCPerf.git

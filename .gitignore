@@ -30,3 +30,31 @@
 *.exe
 *.out
 *.app
+
+# PEBS output files
+*.dat
+
+# Binaries
+gups_hemem/gups-skewed
+gups_hemem/gups-hotset-move
+gups_hemem/gups-random
+
+# Reult dir
+results
+
+# Run artifacts
+*.model
+*.log
+liblinear-2.47/kdd12
+liblinear-2.47/predict
+liblinear-2.47/train
+MERCI/data
+logs.txt
+stats.txt
+times.txt
+*.backup
+*.xl
+*.par
+
+# Jupyter Notebook
+.ipynb_checkpoints

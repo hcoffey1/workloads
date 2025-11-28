@@ -1,0 +1,13 @@
+diff --git a/pebs.cpp b/pebs.cpp
+index d9b154e..b80bac6 100644
+--- a/pebs.cpp
++++ b/pebs.cpp
+@@ -253,7 +253,7 @@ void *pebs_scan_thread(void *args)
+           ps = (struct perf_sample*)ph;
+           assert(ps != NULL);
+           if(ps->addr != 0) {
+-            __u64 pfn = ps->addr >> PAGE_SHIFT;
++            __u64 pfn = (ps->addr >> PAGE_SHIFT) << PAGE_SHIFT;
+             
+             // Update page count
+             auto it = page_counts[tid].find(pfn);

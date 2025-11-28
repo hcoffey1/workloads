@@ -1,0 +1,11 @@
+python plot_vma_access.py -d results/results_flexkvs/flexkvs_flexkvs_samples.dat -r results/results_flexkvs/flexkvs_flexkvs_vma.csv -t flexkvs
+python plot_vma_access.py -d results/results_gapbs/gapbs_bc_samples.dat -r results/results_gapbs/gapbs_bc_vma.csv -t bc
+python plot_vma_access.py -d results/results_gapbs/gapbs_bfs_samples.dat -r results/results_gapbs/gapbs_bfs_vma.csv -t bfs
+python plot_vma_access.py -d results/results_gapbs/gapbs_cc_samples.dat -r results/results_gapbs/gapbs_cc_vma.csv -t cc
+python plot_vma_access.py -d results/results_gapbs/gapbs_pr_samples.dat -r results/results_gapbs/gapbs_pr_vma.csv -t pr
+python plot_vma_access.py -d results/results_gapbs/gapbs_sssp_samples.dat -r results/results_gapbs/gapbs_sssp_vma.csv -t sssp
+python plot_vma_access.py -d results/results_gapbs/gapbs_tc_samples.dat -r results/results_gapbs/gapbs_tc_vma.csv -t tc
+python plot_vma_access.py -d results/results_liblinear/liblinear_liblinear_samples.dat -r results/results_liblinear/liblinear_liblinear_vma.csv -t liblinear
+python plot_vma_access.py -d results/results_merci/merci_merci_samples.dat -r results/results_merci/merci_merci_vma.csv -t merci
+python plot_vma_access.py -d results/results_silo/silo_silo_samples.dat -r results/results_silo/silo_silo_vma.csv -t silo
+python plot_vma_access.py -d results/results_xsbench/xsbench_xsbench_samples.dat -r results/results_xsbench/xsbench_xsbench_vma.csv -t xsbench
