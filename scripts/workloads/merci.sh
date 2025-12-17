@@ -22,7 +22,7 @@ run_merci(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/MERCI/4_performance_evaluation/bin/eval_baseline" "--dataset amazon_All -r \"$num_reps\" -c \"$num_threads\"" "export HOME=\"$CUR_PATH\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 
     start_bwmon
 }

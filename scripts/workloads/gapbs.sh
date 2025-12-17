@@ -13,7 +13,7 @@ config_gapbs(){
 }
 
 build_gapbs(){
-    (cd $CUR_PATH/gapbs && make -j$(nproc) && make bench-graphs -j$(nproc))
+    (cd $CUR_PATH/gapbs && make -j$(nproc) && make bench-graphs -j 1)
 }
 
 run_gapbs(){
