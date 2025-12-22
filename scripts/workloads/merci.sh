@@ -5,7 +5,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_merci(){
     num_threads=8
-    num_reps=5
+    num_reps=20
 }
 
 build_merci(){

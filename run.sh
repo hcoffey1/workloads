@@ -359,6 +359,9 @@ main() {
     : "${HEMEMPOL:=}"
     : "${MIN_INTERPOSE_MEM_SIZE:=}"
 
+    # Set to jemalloc etc. system default otherwise.
+    : "${SYS_ALLOC:=}"
+
     # Parse arguments
     # Parse arguments, add --record-vma flag
     RECORD_VMA=0
