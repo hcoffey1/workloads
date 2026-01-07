@@ -19,7 +19,7 @@ declare -g CUR_PATH DAMO_PATH PEBS_PATH PEBS_PIPE
 declare -g SUITE WORKLOAD CONFIG_FILE INSTRUMENT OUTPUT_DIR ITERATIONS
 declare -g SAMPLING_RATE AGG_RATE MIN_NUM_DAMO MAX_NUM_DAMO
 declare -g DAMON_AUTO_ACCESS_BP DAMON_AUTO_AGGRS
-declare -g hemem_policy workload_pid
+declare -g hemem_policy workload_pid NUMASTAT_PID
 
 # ==============================================================================
 # UTILITY FUNCTIONS
@@ -104,6 +104,28 @@ EOF
 # SYSTEM MANAGEMENT FUNCTIONS
 # ==============================================================================
 
+start_numastat() {
+    local outfile="${OUTPUT_DIR}/numastat_iter${CURRENT_ITERATION}.txt"
+    echo "Starting numastat logging to $outfile"
+    (
+        while true; do
+            echo "=== $(date) ===" >> "$outfile"
+            numastat -mn >> "$outfile"
+            sleep 1
+        done
+    ) &
+    NUMASTAT_PID=$!
+}
+
+stop_numastat() {
+    if [[ -n "${NUMASTAT_PID:-}" ]]; then
+        echo "Stopping numastat logging (PID: $NUMASTAT_PID)"
+        kill "$NUMASTAT_PID" 2>/dev/null || true
+        wait "$NUMASTAT_PID" 2>/dev/null || true
+        unset NUMASTAT_PID
+    fi
+}
+
 sys_init() {
     echo "Initializing system..."
     # Disable randomized va space for consistent memory layout
@@ -111,10 +133,13 @@ sys_init() {
     # Drop page cache for clean memory state
     sync
     echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+
+    start_numastat
 }
 
 sys_cleanup() {
     echo "Cleaning up system..."
+    stop_numastat
     # Re-enable randomized va space
     echo 2 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
 }
