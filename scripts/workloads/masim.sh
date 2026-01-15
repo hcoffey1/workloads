@@ -4,7 +4,10 @@
 source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_masim(){
-    return
+    local config_override="$1"
+
+    #masim_config="${config_override:-$CUR_PATH/masim/configs/huge_stairs_30secs.cfg}"
+    masim_config="${config_override:-$CUR_PATH/masim/configs/zipf_seq_parallel_20s.cfg}"
 }
 
 build_masim(){
@@ -13,43 +16,29 @@ build_masim(){
 
 run_masim(){
     local workload=$1
-    
-    # Generate filenames using utility function
-    generate_workload_filenames "$workload"
-    
-    # create wrapper (expand outer-shell vars now, but keep $$ for the wrapper to write its own PID)
-    cat > "$WRAPPER" <<EOF
-#!/bin/sh
-# write this process's PID (will be the PID of masim after exec)
-echo \$\$ > "$PIDFILE"
 
-# replace shell with the real binary so PID stays the same
-exec "$CUR_PATH/masim/$workload" "$CUR_PATH/masim/configs/hc.cfg" -c 2
-EOF
-    chmod +x "$WRAPPER"
+    local masim_bin="$CUR_PATH/masim/$workload"
 
-    # run with taskset (masim doesn't need sudo or NUMA binding); time measures the wrapper -> execed masim
-    if [[ "${VMA_RECORD:-0}" == "1" ]]; then
-        echo "Starting masim with VMA recording..."
-        /usr/bin/time -v -o "$TIMEFILE" \
-            taskset 0xFF \
-            "$CUR_PATH/scripts/vma/record_vma.sh" "$OUTPUT_DIR" \
-            "$WRAPPER" \
-            1> "$STDOUT" 2> "$STDERR" &
-    else
-        /usr/bin/time -v -o "$TIMEFILE" \
-            taskset 0xFF \
-            "$WRAPPER" \
-            1> "$STDOUT" 2> "$STDERR" &
+    if [[ ! -x "$masim_bin" ]]; then
+        echo "ERROR: masim binary not found at $masim_bin"
+        return 1
     fi
 
-    # wait until wrapper has written pidfile (tiny loop is fine)
-    while [ ! -s "$PIDFILE" ]; do sleep 0.01; done
-    workload_pid=$(cat "$PIDFILE")
-    echo "workload_pid=$workload_pid"
+    if [[ ! -f "$masim_config" ]]; then
+        echo "ERROR: masim config not found at $masim_config"
+        return 1
+    fi
 
-    # optional: cleanup wrapper if you don't need it
-    rm -f "$WRAPPER"
+    generate_workload_filenames "$workload"
+
+    local masim_args="\"$masim_config\""
+    if [[ -n "${MASIM_EXTRA_ARGS:-}" ]]; then
+        masim_args+=" ${MASIM_EXTRA_ARGS}"
+    fi
+
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$masim_bin" "$masim_args"
+
+    run_workload_standard "--cpunodebind=0 -p 0"
 }
 
 run_strace_masim(){

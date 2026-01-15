@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 interval=2
 output_file="memory_regions.csv"
@@ -97,12 +98,11 @@ main() {
         sleep "$interval"
     done
 
-    # Initialize and activate conda environment for Python script
-    # Source conda.sh to make conda command available
-    eval "$(/users/hjcoffey/miniconda3/bin/conda shell.bash hook)"
-    conda activate dataVis
-    
-    python "$WORKLOADS_ROOT/scripts/vma/coalesce_smap.py" "$output_path"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "$WORKLOADS_ROOT/scripts/vma/coalesce_smap.py" "$output_path"
+    else
+        echo "python3 not found; skipping smap deduplication" >&2
+    fi
 
     #echo "Process $target_pid exited."
 }
