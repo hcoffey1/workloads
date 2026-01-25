@@ -19,7 +19,7 @@ declare -g CUR_PATH DAMO_PATH PEBS_PATH PEBS_PIPE
 declare -g SUITE WORKLOAD CONFIG_FILE INSTRUMENT OUTPUT_DIR ITERATIONS
 declare -g SAMPLING_RATE AGG_RATE MIN_NUM_DAMO MAX_NUM_DAMO
 declare -g DAMON_AUTO_ACCESS_BP DAMON_AUTO_AGGRS
-declare -g hemem_policy workload_pid NUMASTAT_PID
+declare -g hemem_policy workload_pid NUMASTAT_PID USE_CGROUP
 
 # ==============================================================================
 # UTILITY FUNCTIONS
@@ -46,6 +46,7 @@ OPTIONAL:
   -x auto_access_bp          Damon auto access_bp parameter
   -y auto_aggrs              Damon auto aggregation parameter
   --record-vma               Enable VMA recording using record_vma.sh
+    --use-cgroup               Add workload process to experiment cgroup
 
 EXAMPLES:
   $0 -b graph500 -w graph500 -o results/baseline
@@ -94,6 +95,7 @@ Output Dir:      $OUTPUT_DIR
 Config File:     ${CONFIG_FILE:-"(none)"}
 Instrumentation: ${INSTRUMENT:-"(none)"}
 VMA Recording:   ${VMA_RECORD:-0}
+Cgroup Enabled:  ${USE_CGROUP:-0}
 Iterations:      $ITERATIONS
 Hemem Policy:    $hemem_policy
 ==================================
@@ -134,6 +136,10 @@ sys_init() {
     sync
     echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
 
+    if [[ "${USE_CGROUP:-0}" == "1" ]]; then
+        setup_cgroups
+    fi
+
     start_numastat
 }
 
@@ -142,6 +148,40 @@ sys_cleanup() {
     stop_numastat
     # Re-enable randomized va space
     echo 2 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
+}
+
+setup_cgroups() {
+    #: "${REGENT_FAST_MEMORY:=}"
+    cg_root="/sys/fs/cgroup"
+    tst_cg="$cg_root/experiment"
+
+    # Use regent_fast_memory bytes here, regent_fast_memory can be 8G, 4G, 10M etc. in this format
+    #readonly bytes_2_gib=$(echo "2^31" | bc)
+    #readonly fast_tier_size="${REGENT_FAST_MEMORY:-4G}"
+    fast_tier_size=$(numfmt --from=iec ${REGENT_FAST_MEMORY:-4G})
+    slow_tier_size=$(numfmt --from=iec 80G)
+
+    echo "+cpuset" | sudo tee $cg_root/cgroup.subtree_control
+
+    if [[ ! -d $tst_cg ]]; then
+        echo "Creating cgroup at $tst_cg"
+        sudo mkdir $tst_cg
+    else
+        echo "Cgroup already exists at $tst_cg"
+    fi
+
+    # we need to add fast and slow tier, put sum in memory.max
+    echo $(( fast_tier_size+slow_tier_size )) | sudo tee "$tst_cg/memory.max"
+    echo "0 $fast_tier_size" | sudo tee "$tst_cg/memory.max_per_node"
+    echo "1 $slow_tier_size" | sudo tee "$tst_cg/memory.max_per_node"
+}
+
+add_to_cgroup() {
+    local pid="$1"
+    #local cg_root="/sys/fs/cgroup"
+    #local tst_cg="$cg_root/experiment"
+
+    echo "$pid" | sudo tee "$tst_cg/cgroup.procs" > /dev/null
 }
 
 # ==============================================================================
@@ -390,15 +430,23 @@ main() {
     # Parse arguments
     # Parse arguments, add --record-vma flag
     RECORD_VMA=0
+    USE_CGROUP=0
     ARGS=()
     for arg in "$@"; do
-        if [[ "$arg" == "--record-vma" ]]; then
-            RECORD_VMA=1
-        else
-            ARGS+=("$arg")
-        fi
+        case "$arg" in
+            --record-vma)
+                RECORD_VMA=1
+                ;;
+            --use-cgroup)
+                USE_CGROUP=1
+                ;;
+            *)
+                ARGS+=("$arg")
+                ;;
+        esac
     done
     export RECORD_VMA
+    export USE_CGROUP
     . $CUR_PATH/scripts/parse_args.sh "${ARGS[@]}"
     print_cmd_args
 

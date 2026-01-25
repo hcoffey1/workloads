@@ -140,6 +140,13 @@ run_workload_standard() {
     workload_pid=$(cat "$PIDFILE")
     echo "workload_pid=$workload_pid"
 
+    if [[ "${USE_CGROUP:-0}" == "1" ]]; then
+        echo "Adding workload PID $workload_pid to experiment cgroup"
+        if ! add_to_cgroup "$workload_pid"; then
+            echo "Warning: failed to add workload to cgroup" >&2
+        fi
+    fi
+
     # optional: cleanup wrapper if you don't need it
     rm -f "$WRAPPER"
     rm -f "$PIDFILE"
