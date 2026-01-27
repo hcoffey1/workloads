@@ -4,17 +4,18 @@
 source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_micro_phase(){
-    phase_regions="${PHASE_REGIONS:-128}"
+    phase_regions="${PHASE_REGIONS:-32}"
     phase_region_mb="${PHASE_REGION_MB:-2}"
     phase_stride="${PHASE_STRIDE:-64}"
-    phase_iters="${PHASE_ITERS:-100}"
-    phase_cycles="${PHASE_CYCLES:-5}"
+    phase_iters="${PHASE_ITERS:-200}"
+    phase_cycles="${PHASE_CYCLES:-2}"
     # Zipfian distribution parameters (optional)
     # To disable zipfian: set PHASE_ZIPF_REGION_MB=0 or unset these variables
-    phase_zipf_region_mb="${PHASE_ZIPF_REGION_MB:-0}"        # 4GB zipfian region (set to 0 to disable)
-    phase_zipf_num_items="${PHASE_ZIPF_NUM_ITEMS:-1048576}"     # 1M items (4KB each = 4GB)
+    phase_zipf_region_mb="${PHASE_ZIPF_REGION_MB:-64}"        # 4GB zipfian region (set to 0 to disable)
+    phase_zipf_item_size="${PHASE_ZIPF_ITEM_SIZE:-4096}"        # item size in bytes (default 4KB)
     phase_zipf_theta="${PHASE_ZIPF_THETA:-0.75}"                # 0.75 for ~1GB hot in 4GB total
     phase_zipf_rate="${PHASE_ZIPF_RATE:-0}"                     # 0 = unlimited
+    phase_zipf_workload_size="${PHASE_ZIPF_WORKLOAD_SIZE:-3000000000}"   # total accesses (0 = unlimited, runs until sequential done)
     # Threading parameters
     phase_threads="${PHASE_THREADS:-8}"                         # number of threads for phase access
     zipf_threads="${ZIPF_THREADS:-8}"                           # number of threads for zipfian access
@@ -36,7 +37,7 @@ run_micro_phase(){
     generate_workload_filenames "$workload"
     local args="${phase_regions} ${phase_region_mb} ${phase_stride} ${phase_iters} ${phase_cycles}"
     # Add zipfian arguments
-    args="${args} ${phase_zipf_region_mb} ${phase_zipf_num_items} ${phase_zipf_theta} ${phase_zipf_rate}"
+    args="${args} ${phase_zipf_region_mb} ${phase_zipf_item_size} ${phase_zipf_theta} ${phase_zipf_rate} ${phase_zipf_workload_size}"
     # Add threading arguments
     args="${args} ${phase_threads} ${zipf_threads}"
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args"

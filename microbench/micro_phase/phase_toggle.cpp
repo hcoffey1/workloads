@@ -102,6 +102,25 @@ static void* mmap_aligned_2mb(size_t length) {
     return reinterpret_cast<void*>(aligned);
 }
 
+static void* mmap_aligned_2mb_at(size_t length, void* hint) {
+    size_t pagesz = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    if (pagesz == 0) pagesz = 4096;
+    size_t request = length + HUGEPAGE_SIZE;
+    void* base = mmap(hint, request, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) {
+        perror("mmap");
+        return MAP_FAILED;
+    }
+    uintptr_t addr = reinterpret_cast<uintptr_t>(base);
+    uintptr_t aligned = (addr + (HUGEPAGE_SIZE - 1)) & ~(HUGEPAGE_SIZE - 1);
+    size_t head = static_cast<size_t>(aligned - addr);
+    if (head) munmap(reinterpret_cast<void*>(addr), head);
+    size_t tail = (addr + request) - (aligned + length);
+    if (tail) munmap(reinterpret_cast<void*>(aligned + length), tail);
+    return reinterpret_cast<void*>(aligned);
+}
+
 static void* alloc_region(size_t bytes) {
     size_t aligned_bytes = round_up_huge(bytes);
     if (use_hugetlb_env()) {
@@ -139,7 +158,9 @@ static void touch_region(const Region& r, size_t stride) {
 
 // Zipfian access worker function
 static void zipfian_worker(const Region& r, size_t num_items, double theta,
-                          size_t accesses_per_sec, std::atomic<bool>& stop_flag, int thread_id) {
+                          size_t accesses_per_sec, size_t max_accesses,
+                          std::atomic<bool>& stop_flag, int thread_id,
+                          std::atomic<long long>& completion_time_us) {
     ZipfianGenerator zipf(num_items, theta, 42 + thread_id);  // Different seed per thread
     size_t item_size = r.bytes / num_items;
     if (item_size == 0) item_size = 64;  // minimum item size
@@ -147,7 +168,8 @@ static void zipfian_worker(const Region& r, size_t num_items, double theta,
     auto start = std::chrono::steady_clock::now();
     size_t total_accesses = 0;
 
-    while (!stop_flag.load(std::memory_order_relaxed)) {
+    while (!stop_flag.load(std::memory_order_relaxed) &&
+           (max_accesses == 0 || total_accesses < max_accesses)) {
         size_t idx = zipf.next();
         size_t offset = idx * item_size;
         if (offset < r.bytes) {
@@ -164,6 +186,17 @@ static void zipfian_worker(const Region& r, size_t num_items, double theta,
             if (elapsed < static_cast<long long>(expected_us)) {
                 std::this_thread::sleep_for(std::chrono::microseconds(expected_us - elapsed));
             }
+        }
+    }
+
+    // Record completion time
+    auto end = std::chrono::steady_clock::now();
+    long long elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    long long expected = 0;
+    // Only update if this thread took longer (max across all threads)
+    while (elapsed_us > (expected = completion_time_us.load(std::memory_order_relaxed))) {
+        if (completion_time_us.compare_exchange_weak(expected, elapsed_us, std::memory_order_relaxed)) {
+            break;
         }
     }
 }
@@ -205,9 +238,10 @@ int main(int argc, char** argv) {
 
     // Zipfian parameters (optional)
     size_t zipf_region_mb = 0;        // 0 = disabled
-    size_t zipf_num_items = 0;        // number of items in zipfian distribution
+    size_t zipf_item_size = 4096;     // size of each item in bytes (default 4KB)
     double zipf_theta = 0.99;         // skewness parameter (0.99 = highly skewed)
     size_t zipf_accesses_per_sec = 0; // 0 = unlimited
+    size_t zipf_workload_size = 0;    // total accesses to perform (0 = unlimited, runs until sequential done)
 
     // Threading parameters
     int phase_threads = 1;            // number of threads for phase access
@@ -219,11 +253,16 @@ int main(int argc, char** argv) {
     if (argc > 4) phase_iters = std::atoi(argv[4]);
     if (argc > 5) cycles = std::atoi(argv[5]);
     if (argc > 6) zipf_region_mb = std::strtoul(argv[6], nullptr, 0);
-    if (argc > 7) zipf_num_items = std::strtoul(argv[7], nullptr, 0);
+    if (argc > 7) zipf_item_size = std::strtoul(argv[7], nullptr, 0);
     if (argc > 8) zipf_theta = std::strtod(argv[8], nullptr);
     if (argc > 9) zipf_accesses_per_sec = std::strtoul(argv[9], nullptr, 0);
-    if (argc > 10) phase_threads = std::atoi(argv[10]);
-    if (argc > 11) zipf_threads = std::atoi(argv[11]);
+    if (argc > 10) zipf_workload_size = std::strtoul(argv[10], nullptr, 0);
+    if (argc > 11) phase_threads = std::atoi(argv[11]);
+    if (argc > 12) zipf_threads = std::atoi(argv[12]);
+    if (stride == 0) stride = 4096;
+    if (zipf_item_size == 0) zipf_item_size = 4096;
+    if (phase_threads < 1) phase_threads = 1;
+    if (zipf_threads < 1) zipf_threads = 1;
     if (stride == 0) stride = 4096;
     if (phase_threads < 1) phase_threads = 1;
     if (zipf_threads < 1) zipf_threads = 1;
@@ -250,9 +289,9 @@ int main(int argc, char** argv) {
               << "MB stride=" << stride << "B phase_iters=" << phase_iters
               << " cycles=" << cycles << " phase_threads=" << phase_threads;
     if (zipf_region_mb > 0) {
-        std::cout << " zipf_region=" << zipf_region_mb << "MB zipf_items=" << zipf_num_items
+        std::cout << " zipf_region=" << zipf_region_mb << "MB zipf_item_size=" << zipf_item_size << "B"
                   << " zipf_theta=" << zipf_theta << " zipf_rate=" << zipf_accesses_per_sec << "/s"
-                  << " zipf_threads=" << zipf_threads;
+                  << " zipf_workload=" << zipf_workload_size << " zipf_threads=" << zipf_threads;
     }
     std::cout << "\n";
 
@@ -319,18 +358,43 @@ int main(int argc, char** argv) {
     // Setup zipfian region and threads if requested
     Region zipf_region{nullptr, 0};
     std::atomic<bool> zipf_stop_flag{false};
+    std::atomic<long long> zipf_completion_time_us{0};
     std::vector<std::thread*> zipf_thread_pool;
 
     if (zipf_region_mb > 0) {
         size_t zipf_bytes = zipf_region_mb * 1024UL * 1024UL;
         size_t zipf_rounded = round_up_huge(zipf_bytes);
-        zipf_region.buf = static_cast<char*>(alloc_region(zipf_bytes));
-        zipf_region.bytes = zipf_rounded;
 
-        if (!zipf_region.buf) {
-            std::cerr << "Failed to allocate zipfian region" << std::endl;
-            return 1;
+        // Calculate hint address to be 512MB after the last sequential region
+        void* hint_addr = nullptr;
+        if (!regions.empty()) {
+            const size_t GUARD_SIZE = 512UL * 1024UL * 1024UL; // 512 MB guard space
+            uintptr_t last_region_end = reinterpret_cast<uintptr_t>(regions.back().buf) + regions.back().bytes;
+            hint_addr = reinterpret_cast<void*>(last_region_end + GUARD_SIZE);
         }
+
+        // Allocate zipfian region with hint address
+        if (use_hugetlb_env()) {
+            int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB;
+#ifdef MAP_HUGE_2MB
+            flags |= MAP_HUGE_2MB;
+#endif
+            zipf_region.buf = static_cast<char*>(mmap(hint_addr, zipf_rounded, PROT_READ | PROT_WRITE, flags, -1, 0));
+            if (zipf_region.buf == MAP_FAILED) {
+                perror("mmap MAP_HUGETLB for zipfian region");
+                return 1;
+            }
+        } else {
+            zipf_region.buf = static_cast<char*>(mmap_aligned_2mb_at(zipf_rounded, hint_addr));
+            if (zipf_region.buf == MAP_FAILED) {
+                std::cerr << "alloc failed for zipfian region via mmap_aligned_2mb" << std::endl;
+                return 1;
+            }
+            if (madvise(zipf_region.buf, zipf_rounded, MADV_HUGEPAGE) != 0) {
+                std::cerr << "madvise(MADV_HUGEPAGE) failed for zipfian: " << strerror(errno) << "\n";
+            }
+        }
+        zipf_region.bytes = zipf_rounded;
 
         std::cout << "zipfian region addr=" << static_cast<void*>(zipf_region.buf)
                   << " aligned_2M=" << ((reinterpret_cast<uintptr_t>(zipf_region.buf) % HUGEPAGE_SIZE == 0) ? "yes" : "no")
@@ -339,21 +403,59 @@ int main(int argc, char** argv) {
         // Prefault zipfian region
         touch_region(zipf_region, page_stride);
 
-        // Determine number of items if not specified
-        if (zipf_num_items == 0) {
-            zipf_num_items = zipf_region.bytes / 4096;  // one item per 4KB page
-        }
+        // Calculate number of items from region size and item size
+        size_t zipf_num_items = zipf_region.bytes / zipf_item_size;
+        if (zipf_num_items == 0) zipf_num_items = 1;  // minimum 1 item
 
         std::cout << "Starting " << zipf_threads << " zipfian worker thread(s) (items=" << zipf_num_items
-                  << ", theta=" << zipf_theta << ")" << std::endl;
+                  << ", item_size=" << zipf_item_size << "B, theta=" << zipf_theta
+                  << ", workload_size=" << zipf_workload_size << ")" << std::endl;
+
+        // Calculate per-thread workload
+        size_t per_thread_accesses = zipf_workload_size;
+        if (zipf_workload_size > 0 && zipf_threads > 1) {
+            per_thread_accesses = zipf_workload_size / zipf_threads;
+        }
 
         // Start zipfian worker threads
         for (int t = 0; t < zipf_threads; t++) {
             zipf_thread_pool.push_back(new std::thread(zipfian_worker, std::ref(zipf_region),
                                                        zipf_num_items, zipf_theta, zipf_accesses_per_sec,
-                                                       std::ref(zipf_stop_flag), t));
+                                                       per_thread_accesses,
+                                                       std::ref(zipf_stop_flag), t,
+                                                       std::ref(zipf_completion_time_us)));
         }
     }
+
+    // Print memory region header
+    std::cout << "\n========== MEMORY REGIONS ==========\n";
+    if (!regions.empty()) {
+        std::cout << "Sequential Phase Zone (" << regions.size() << " regions):\n";
+        uintptr_t phase_start = reinterpret_cast<uintptr_t>(regions[0].buf);
+        uintptr_t phase_end = phase_start + regions[0].bytes - 1;
+
+        for (size_t i = 1; i < regions.size(); i++) {
+            uintptr_t region_start = reinterpret_cast<uintptr_t>(regions[i].buf);
+            uintptr_t region_end = region_start + regions[i].bytes - 1;
+
+            if (region_start < phase_start) {
+                phase_start = region_start;
+            }
+            if (region_end > phase_end) {
+                phase_end = region_end;
+            }
+        }
+        std::cout << "  Start: 0x" << std::hex << phase_start << std::dec << "\n";
+        std::cout << "  End:   0x" << std::hex << phase_end << std::dec << "\n";
+    }
+    if (zipf_region.buf) {
+        std::cout << "Zipfian Zone:\n";
+        uintptr_t zipf_start = reinterpret_cast<uintptr_t>(zipf_region.buf);
+        uintptr_t zipf_end = zipf_start + zipf_region.bytes - 1;
+        std::cout << "  Start: 0x" << std::hex << zipf_start << std::dec << "\n";
+        std::cout << "  End:   0x" << std::hex << zipf_end << std::dec << "\n";
+    }
+    std::cout << "====================================\n\n";
 
     std::cerr << "===ROI_START===" << std::endl;
 
@@ -372,6 +474,10 @@ int main(int argc, char** argv) {
                                                         std::ref(barrier_count), phase_threads));
         }
     }
+
+    // Start timing for the entire workload
+    auto workload_start = std::chrono::high_resolution_clock::now();
+    auto sequential_start = workload_start;
 
     for (int c = 0; c < cycles; c++) {
         std::vector<double> region_ms(regions.size(), 0.0);
@@ -412,6 +518,11 @@ int main(int argc, char** argv) {
                       << cycle_delta_kb << " kB, coverage=" << (cycle_cov * 100.0) << "%)" << std::endl;
         }
     }
+
+    // Calculate sequential phase time
+    auto sequential_end = std::chrono::high_resolution_clock::now();
+    double sequential_time_ms = std::chrono::duration_cast<std::chrono::microseconds>(sequential_end - sequential_start).count() / 1000.0;
+
     std::cerr << "===ROI_END===" << std::endl;
 
     // Stop phase worker threads if running
@@ -426,15 +537,33 @@ int main(int argc, char** argv) {
     }
 
     // Stop zipfian threads if running
+    double zipfian_time_ms = 0.0;
     if (!zipf_thread_pool.empty()) {
-        std::cout << "Stopping zipfian worker threads..." << std::endl;
-        zipf_stop_flag.store(true, std::memory_order_relaxed);
+        if (zipf_workload_size == 0) {
+            std::cout << "Stopping zipfian worker threads (unlimited)..." << std::endl;
+            zipf_stop_flag.store(true, std::memory_order_relaxed);
+        } else {
+            std::cout << "Waiting for zipfian worker threads to complete (" << zipf_workload_size << " accesses)..." << std::endl;
+        }
+
         for (auto* t : zipf_thread_pool) {
             t->join();
             delete t;
         }
+        // Get the completion time that was tracked by the worker threads
+        zipfian_time_ms = zipf_completion_time_us.load(std::memory_order_relaxed) / 1000.0;
         std::cout << "Zipfian worker threads stopped" << std::endl;
     }
+
+    // Report timing summary
+    double total_time_ms = sequential_time_ms + zipfian_time_ms;
+
+    std::cout << "\n========== TIMING SUMMARY ==========\n";
+    std::cout << "Sequential Phase Time: " << sequential_time_ms << " ms\n";
+    if (zipf_region_mb > 0) {
+        std::cout << "Zipfian Phase Time:    " << zipfian_time_ms << " ms\n";
+    }
+    std::cout << "Total Time (Sum):      " << total_time_ms << " ms\n";
 
     // Cleanup zipfian region
     if (zipf_region.buf) {
