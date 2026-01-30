@@ -160,7 +160,8 @@ static void touch_region(const Region& r, size_t stride) {
 static void zipfian_worker(const Region& r, size_t num_items, double theta,
                           size_t accesses_per_sec, size_t max_accesses,
                           std::atomic<bool>& stop_flag, int thread_id,
-                          std::atomic<long long>& completion_time_us) {
+                          std::atomic<long long>& completion_time_us,
+                          std::atomic<int>* active_threads = nullptr) {
     ZipfianGenerator zipf(num_items, theta, 42 + thread_id);  // Different seed per thread
     size_t item_size = r.bytes / num_items;
     if (item_size == 0) item_size = 64;  // minimum item size
@@ -199,6 +200,10 @@ static void zipfian_worker(const Region& r, size_t num_items, double theta,
             break;
         }
     }
+
+    if (active_threads) {
+        active_threads->fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 // Phase access worker function for multi-threaded phase access (concurrent on same region)
@@ -229,6 +234,133 @@ static void phase_worker(const std::vector<Region>& regions, size_t stride, int 
     }
 }
 
+
+static bool allocate_zipf_mem(Region& r, size_t region_mb, void* hint_addr) {
+    size_t zipf_bytes = region_mb * 1024UL * 1024UL;
+    size_t zipf_rounded = round_up_huge(zipf_bytes);
+
+    if (use_hugetlb_env()) {
+        int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB;
+#ifdef MAP_HUGE_2MB
+        flags |= MAP_HUGE_2MB;
+#endif
+        r.buf = static_cast<char*>(mmap(hint_addr, zipf_rounded, PROT_READ | PROT_WRITE, flags, -1, 0));
+        if (r.buf == MAP_FAILED) {
+            perror("mmap MAP_HUGETLB for zipfian region");
+            return false;
+        }
+    } else {
+        r.buf = static_cast<char*>(mmap_aligned_2mb_at(zipf_rounded, hint_addr));
+        if (r.buf == MAP_FAILED) {
+            std::cerr << "alloc failed for zipfian region via mmap_aligned_2mb" << std::endl;
+            return false;
+        }
+        if (madvise(r.buf, zipf_rounded, MADV_HUGEPAGE) != 0) {
+            std::cerr << "madvise(MADV_HUGEPAGE) failed for zipfian: " << strerror(errno) << "\n";
+        }
+    }
+    r.bytes = zipf_rounded;
+    return true;
+}
+
+// Manager thread to handle the lifecycle of the Zipfian workload
+// This allows the Zipfian phase to repeat multiple times with sleep intervals,
+// independent of the main sequential workload (although it stops if main stops).
+// It manages memory allocation/deallocation if unmap_sleep is true.
+static void zipf_manager_thread(Region* r, size_t zipf_region_mb, void* hint_addr,
+                                size_t zipf_item_size, double zipf_theta,
+                                size_t zipf_accesses_per_sec, size_t zipf_workload_size,
+                                int zipf_threads, int zipf_repeats, int zipf_sleep_sec,
+                                bool zipf_unmap_sleep, std::atomic<bool>* main_stop_flag,
+                                std::atomic<long long>* completion_time_us) {
+
+    std::atomic<int> active_threads{0};
+
+    // run is 0-indexed count of repeats. 0 to zipf_repeats inclusive.
+    // If repeats=0, runs once (run 0).
+    // If repeats=1, runs twice (run 0, run 1).
+    for (int run = 0; run <= zipf_repeats; run++) {
+        // Check if main thread asked to stop (e.g. sequential phase finished)
+        if (main_stop_flag->load(std::memory_order_relaxed)) break;
+
+        // Ensure memory is allocated.
+        // For the first run, main() likely allocated it.
+        // For subsequent runs, if unmap_sleep is true, we re-allocate here.
+        if (r->buf == nullptr) {
+             if (!allocate_zipf_mem(*r, zipf_region_mb, hint_addr)) {
+                 std::cerr << "Failed to allocate zipf memory for run " << run << std::endl;
+                 break;
+             }
+             // Prefault to avoid page faults during measurement
+             size_t page_stride = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+             if (page_stride == 0) page_stride = 4096;
+             touch_region(*r, page_stride);
+             if (run > 0) std::cout << "Re-allocated zipf region for run " << run << ": " << (void*)r->buf << std::endl;
+        }
+
+        size_t zipf_num_items = r->bytes / zipf_item_size;
+        if (zipf_num_items == 0) zipf_num_items = 1;
+
+        if (run > 0) std::cout << "Starting Zipfian Run " << run << std::endl;
+
+        std::vector<std::thread*> threads;
+        std::atomic<bool> local_stop{false};
+        std::atomic<long long> run_max_us{0};
+
+        size_t per_thread_accesses = zipf_workload_size;
+        if (zipf_workload_size > 0 && zipf_threads > 1) {
+            per_thread_accesses = zipf_workload_size / zipf_threads;
+        }
+
+        active_threads.store(zipf_threads);
+        for (int t = 0; t < zipf_threads; t++) {
+            // Pass active_threads counter so workers decrement it upon completion
+            // Pass run_max_us to track duration of this specific run
+            threads.push_back(new std::thread(zipfian_worker, std::ref(*r),
+                                                       zipf_num_items, zipf_theta, zipf_accesses_per_sec,
+                                                       per_thread_accesses,
+                                                       std::ref(local_stop), t,
+                                                       std::ref(run_max_us),
+                                                       &active_threads));
+        }
+
+        // Wait for workers to finish
+        // We poll active_threads instead of joining immediately so we can respond to main_stop_flag
+        while (active_threads.load(std::memory_order_relaxed) > 0) {
+             if (main_stop_flag->load(std::memory_order_relaxed)) {
+                 local_stop.store(true); // Signal workers to stop early
+             }
+             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        for (auto* t : threads) {
+            t->join();
+            delete t;
+        }
+
+        long long current_run_time = run_max_us.load();
+        std::cout << "Zipfian Run " << run << " Time: " << (current_run_time / 1000.0) << " ms" << std::endl;
+        completion_time_us->fetch_add(current_run_time, std::memory_order_relaxed);
+
+        // Between repeats (if not the last one and not stopped)
+        if (run < zipf_repeats && !main_stop_flag->load(std::memory_order_relaxed)) {
+            if (zipf_unmap_sleep) {
+                // Free memory to simulate "cold" start or memory pressure release
+                munmap(r->buf, r->bytes);
+                r->buf = nullptr;
+                // We keep r->bytes non-zero or calculate it again in allocate_zipf_mem
+            }
+            std::cout << "Zipfian Run " << run << " finished. Sleeping " << zipf_sleep_sec << "s..." << std::endl;
+
+            // Sleep in small chunks to remain responsive to main_stop_flag
+            for (int s = 0; s < zipf_sleep_sec * 10; s++) {
+                if (main_stop_flag->load(std::memory_order_relaxed)) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     size_t num_regions = 2;    // A/B by default
     size_t region_mb = 1024;   // 1 GB per region
@@ -247,6 +379,11 @@ int main(int argc, char** argv) {
     int phase_threads = 1;            // number of threads for phase access
     int zipf_threads = 1;             // number of threads for zipfian access
 
+    // New parameters
+    int zipf_repeats = 0;
+    int zipf_sleep_sec = 0;
+    bool zipf_unmap_sleep = false;
+
     if (argc > 1) num_regions = std::strtoul(argv[1], nullptr, 0);
     if (argc > 2) region_mb = std::strtoul(argv[2], nullptr, 0);
     if (argc > 3) stride = std::strtoul(argv[3], nullptr, 0);
@@ -259,11 +396,12 @@ int main(int argc, char** argv) {
     if (argc > 10) zipf_workload_size = std::strtoul(argv[10], nullptr, 0);
     if (argc > 11) phase_threads = std::atoi(argv[11]);
     if (argc > 12) zipf_threads = std::atoi(argv[12]);
+    if (argc > 13) zipf_repeats = std::atoi(argv[13]);
+    if (argc > 14) zipf_sleep_sec = std::atoi(argv[14]);
+    if (argc > 15) zipf_unmap_sleep = (std::atoi(argv[15]) != 0);
+
     if (stride == 0) stride = 4096;
     if (zipf_item_size == 0) zipf_item_size = 4096;
-    if (phase_threads < 1) phase_threads = 1;
-    if (zipf_threads < 1) zipf_threads = 1;
-    if (stride == 0) stride = 4096;
     if (phase_threads < 1) phase_threads = 1;
     if (zipf_threads < 1) zipf_threads = 1;
 
@@ -291,7 +429,9 @@ int main(int argc, char** argv) {
     if (zipf_region_mb > 0) {
         std::cout << " zipf_region=" << zipf_region_mb << "MB zipf_item_size=" << zipf_item_size << "B"
                   << " zipf_theta=" << zipf_theta << " zipf_rate=" << zipf_accesses_per_sec << "/s"
-                  << " zipf_workload=" << zipf_workload_size << " zipf_threads=" << zipf_threads;
+                  << " zipf_workload=" << zipf_workload_size << " zipf_threads=" << zipf_threads
+                  << " zipf_repeats=" << zipf_repeats << " zipf_sleep=" << zipf_sleep_sec << "s"
+                  << " zipf_unmap=" << zipf_unmap_sleep;
     }
     std::cout << "\n";
 
@@ -359,12 +499,9 @@ int main(int argc, char** argv) {
     Region zipf_region{nullptr, 0};
     std::atomic<bool> zipf_stop_flag{false};
     std::atomic<long long> zipf_completion_time_us{0};
-    std::vector<std::thread*> zipf_thread_pool;
+    std::thread* zipf_manager = nullptr;
 
     if (zipf_region_mb > 0) {
-        size_t zipf_bytes = zipf_region_mb * 1024UL * 1024UL;
-        size_t zipf_rounded = round_up_huge(zipf_bytes);
-
         // Calculate hint address to be 512MB after the last sequential region
         void* hint_addr = nullptr;
         if (!regions.empty()) {
@@ -374,27 +511,9 @@ int main(int argc, char** argv) {
         }
 
         // Allocate zipfian region with hint address
-        if (use_hugetlb_env()) {
-            int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB;
-#ifdef MAP_HUGE_2MB
-            flags |= MAP_HUGE_2MB;
-#endif
-            zipf_region.buf = static_cast<char*>(mmap(hint_addr, zipf_rounded, PROT_READ | PROT_WRITE, flags, -1, 0));
-            if (zipf_region.buf == MAP_FAILED) {
-                perror("mmap MAP_HUGETLB for zipfian region");
-                return 1;
-            }
-        } else {
-            zipf_region.buf = static_cast<char*>(mmap_aligned_2mb_at(zipf_rounded, hint_addr));
-            if (zipf_region.buf == MAP_FAILED) {
-                std::cerr << "alloc failed for zipfian region via mmap_aligned_2mb" << std::endl;
-                return 1;
-            }
-            if (madvise(zipf_region.buf, zipf_rounded, MADV_HUGEPAGE) != 0) {
-                std::cerr << "madvise(MADV_HUGEPAGE) failed for zipfian: " << strerror(errno) << "\n";
-            }
+        if (!allocate_zipf_mem(zipf_region, zipf_region_mb, hint_addr)) {
+            return 1;
         }
-        zipf_region.bytes = zipf_rounded;
 
         std::cout << "zipfian region addr=" << static_cast<void*>(zipf_region.buf)
                   << " aligned_2M=" << ((reinterpret_cast<uintptr_t>(zipf_region.buf) % HUGEPAGE_SIZE == 0) ? "yes" : "no")
@@ -407,24 +526,17 @@ int main(int argc, char** argv) {
         size_t zipf_num_items = zipf_region.bytes / zipf_item_size;
         if (zipf_num_items == 0) zipf_num_items = 1;  // minimum 1 item
 
-        std::cout << "Starting " << zipf_threads << " zipfian worker thread(s) (items=" << zipf_num_items
-                  << ", item_size=" << zipf_item_size << "B, theta=" << zipf_theta
-                  << ", workload_size=" << zipf_workload_size << ")" << std::endl;
+        std::cout << "Starting zipfian manager thread (threads=" << zipf_threads
+                  << ", items=" << zipf_num_items
+                  << ", workload=" << zipf_workload_size
+                  << ", repeats=" << zipf_repeats
+                  << ", sleep=" << zipf_sleep_sec << "s"
+                  << (zipf_unmap_sleep ? ", unmap" : "") << ")" << std::endl;
 
-        // Calculate per-thread workload
-        size_t per_thread_accesses = zipf_workload_size;
-        if (zipf_workload_size > 0 && zipf_threads > 1) {
-            per_thread_accesses = zipf_workload_size / zipf_threads;
-        }
-
-        // Start zipfian worker threads
-        for (int t = 0; t < zipf_threads; t++) {
-            zipf_thread_pool.push_back(new std::thread(zipfian_worker, std::ref(zipf_region),
-                                                       zipf_num_items, zipf_theta, zipf_accesses_per_sec,
-                                                       per_thread_accesses,
-                                                       std::ref(zipf_stop_flag), t,
-                                                       std::ref(zipf_completion_time_us)));
-        }
+        zipf_manager = new std::thread(zipf_manager_thread, &zipf_region, zipf_region_mb, hint_addr,
+                                       zipf_item_size, zipf_theta, zipf_accesses_per_sec, zipf_workload_size,
+                                       zipf_threads, zipf_repeats, zipf_sleep_sec, zipf_unmap_sleep,
+                                       &zipf_stop_flag, &zipf_completion_time_us);
     }
 
     // Print memory region header
@@ -538,21 +650,19 @@ int main(int argc, char** argv) {
 
     // Stop zipfian threads if running
     double zipfian_time_ms = 0.0;
-    if (!zipf_thread_pool.empty()) {
+    if (zipf_manager) {
         if (zipf_workload_size == 0) {
-            std::cout << "Stopping zipfian worker threads (unlimited)..." << std::endl;
+            std::cout << "Stopping zipfian manager (unlimited)..." << std::endl;
             zipf_stop_flag.store(true, std::memory_order_relaxed);
         } else {
-            std::cout << "Waiting for zipfian worker threads to complete (" << zipf_workload_size << " accesses)..." << std::endl;
+            std::cout << "Waiting for zipfian manager to complete..." << std::endl;
         }
 
-        for (auto* t : zipf_thread_pool) {
-            t->join();
-            delete t;
-        }
-        // Get the completion time that was tracked by the worker threads
+        zipf_manager->join();
+        delete zipf_manager;
+
         zipfian_time_ms = zipf_completion_time_us.load(std::memory_order_relaxed) / 1000.0;
-        std::cout << "Zipfian worker threads stopped" << std::endl;
+        std::cout << "Zipfian manager stopped" << std::endl;
     }
 
     // Report timing summary
