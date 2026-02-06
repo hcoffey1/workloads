@@ -9,9 +9,10 @@
 
 # Configuration Parameters
 FAST_MEM_VALUES=("8G")
-ITERATIONS=10
-ZIPF_VALUES=("1000000000" "2000000000" "3000000000" "4000000000")
-HYBRID_SIZES=("2G" "4G" "8G")
+ITERATIONS=20
+ZIPF_VALUES=("2000000000")
+#ZIPF_VALUES=("1000000000" "2000000000" "3000000000" "4000000000")
+HYBRID_SIZES=("2G" "4G")
 #HYBRID_SIZES=("16M")
 LIB_ARMS_PATH=~/arms/libarms_kernel.so
 
@@ -57,7 +58,7 @@ for FAST_MEM in "${FAST_MEM_VALUES[@]}"; do
         for SIZE in "${HYBRID_SIZES[@]}"; do
             echo "Running Hybrid with SIZE=$SIZE"
             REGENT_FAST_MEMORY=$FAST_MEM \
-            REGENT_REGIONS=lru_ptscan:0x7ffdf7000000-0x7ffff75fffff:$SIZE \
+            REGENT_REGIONS=lru_ptscan:0x7ffee0000000-0x7fffe3dfffff:$SIZE \
             HEMEMPOL=$LIB_ARMS_PATH ./run.sh \
             -b micro_phase -w micro_phase -o "$OUTPUT_DIR/results_hybrid_$SIZE" \
             -r $ITERATIONS --use-cgroup
