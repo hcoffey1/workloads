@@ -107,12 +107,18 @@ EOF
 # ==============================================================================
 
 start_numastat() {
+    local monitor_pid="$1"
     local outfile="${OUTPUT_DIR}/numastat_iter${CURRENT_ITERATION}.txt"
     echo "Starting numastat logging to $outfile"
     (
         while true; do
             echo "=== $(date) ===" >> "$outfile"
-            numastat -mn >> "$outfile"
+            if [[ -n "$monitor_pid" ]]; then
+                sudo numastat -p "$monitor_pid" >> "$outfile" 2>/dev/null
+                numastat -mn >> "$outfile"
+            else
+                numastat -mn >> "$outfile"
+            fi
             sleep 1
         done
     ) &
@@ -139,8 +145,6 @@ sys_init() {
     if [[ "${USE_CGROUP:-0}" == "1" ]]; then
         setup_cgroups
     fi
-
-    start_numastat
 }
 
 sys_cleanup() {
@@ -360,6 +364,7 @@ run_with_pebs() {
     start_pebs "$pebs_output" "$SAMPLING_RATE"
 
     run_workload
+    start_numastat "$workload_pid"
     wait_for_workload
 
     stop_pebs
@@ -373,6 +378,7 @@ run_with_damon() {
     damo_file=$(generate_damo_filename)
 
     run_workload
+    start_numastat "$workload_pid"
 
     # Set up region parameters
     if [[ -n "$MIN_NUM_DAMO" || -n "$MAX_NUM_DAMO" ]]; then
@@ -397,6 +403,7 @@ run_without_instrumentation() {
     sys_init
 
     run_workload
+    start_numastat "$workload_pid"
     wait_for_workload
 
     sys_cleanup

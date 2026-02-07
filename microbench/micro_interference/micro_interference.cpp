@@ -181,6 +181,10 @@ static void sequential_worker(
 ) {
     using Clock = std::chrono::steady_clock;
 
+    // Initialize RNG
+    std::random_device rd;
+    std::mt19937 rng(rd());
+
     // Handle delay
     if (config.delay_sec > 0) {
         auto delay_ms = static_cast<int>(config.delay_sec * 1000);
@@ -215,9 +219,19 @@ static void sequential_worker(
                 if (global_stop.load(std::memory_order_relaxed)) break;
 
                 volatile char* p = region.buf;
-                for (size_t i = 0; i < region.bytes; i += stride) {
-                    p[i]++;
-                    op_counter.fetch_add(1, std::memory_order_relaxed);
+                size_t num_accesses = region.bytes / stride;
+                if (num_accesses == 0 && region.bytes > 0) num_accesses = 1;
+
+                if (num_accesses > 0) {
+                    std::uniform_int_distribution<size_t> dist(0, num_accesses - 1);
+                    for (size_t i = 0; i < num_accesses; i++) {
+                        size_t idx = dist(rng);
+                        size_t offset = idx * stride;
+                        if (offset < region.bytes) {
+                            p[offset]++;
+                            op_counter.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
                 }
             }
         }
