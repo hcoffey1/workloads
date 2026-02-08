@@ -18,7 +18,7 @@ config_micro_interference() {
     SEQ_STRIDE="${SEQ_STRIDE:-64}"                  # Access stride (bytes)
     SEQ_DELAY="${SEQ_DELAY:-0}"                       # Delay before starting (seconds)
     SEQ_RUNTIME="${SEQ_RUNTIME:-0}"                   # Runtime (0 = global duration)
-    SEQ_ITERS="${SEQ_ITERS:-10}"                       # Iterations per region
+    SEQ_ITERS="${SEQ_ITERS:-2}"                       # Iterations per region
     SEQ_THREADS="${SEQ_THREADS:-8}"                   # Number of threads
 
     # Zipfian pattern settings (16GB)
@@ -61,6 +61,22 @@ run_micro_interference() {
         echo "Using Hardcoded Sequential VA Range: $SEQ_VA_RANGE"
         echo "Set REGENT_REGIONS=$regent_regions"
         extra_envs="export REGENT_REGIONS=\"$regent_regions\""
+    fi
+
+    if [[ -n "${REGENT_ANNOTATION_FILE:-}" ]]; then
+        if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
+        # Append iteration to filename to avoid overwriting/mixing
+        local anno_file="${REGENT_ANNOTATION_FILE}"
+        if [[ -n "${CURRENT_ITERATION:-}" ]]; then
+             if [[ "$anno_file" == *.* ]]; then
+                 local ext="${anno_file##*.}"
+                 local base="${anno_file%.*}"
+                 anno_file="${base}_iter${CURRENT_ITERATION}.${ext}"
+             else
+                 anno_file="${anno_file}_iter${CURRENT_ITERATION}"
+             fi
+        fi
+        extra_envs+="export REGENT_ANNOTATION_FILE=\"$anno_file\""
     fi
 
     generate_workload_filenames "$workload"
