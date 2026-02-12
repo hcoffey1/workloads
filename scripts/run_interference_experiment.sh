@@ -27,180 +27,213 @@ ZIPF_THETA=0.8
 ZIPF_THREADS=8
 
 # ARMS configuration
-FAST_MEM="${FAST_MEM:-2G}"          # Fast tier size
+FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
 SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
-ITERATIONS="${ITERATIONS:-10}"
+ITERATIONS="${ITERATIONS:-5}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/arms/libarms_kernel.so}"
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
+
+#export REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis"
+#export REGENT_VISUALIZATION=1
 
 # Output directory
 OUTPUT_BASE="${OUTPUT_BASE:-results_interference}"
 
 # =============================================================================
-# HELPER FUNCTIONS
+# EXPERIMENT FUNCTIONS
 # =============================================================================
 
-run_experiment() {
+launch_experiment() {
     local name="$1"
-    local seq_delay="$2"
-    local seq_runtime="$3"
-    local zipf_delay="$4"
-    local zipf_runtime="$5"
-    local output_dir="$6"
-    local policy="$7"  # "hybrid" or "control"
+    local output_dir="$2"
 
-    echo "=================================================="
-    echo "Running: $name ($policy)"
-    echo "  Sequential: delay=${seq_delay}s, runtime=${seq_runtime}s"
-    echo "  Zipfian:    delay=${zipf_delay}s, runtime=${zipf_runtime}s"
-    echo "=================================================="
+    echo "--------------------------------------------------"
+    echo "Experiment: $name"
+    echo "Output: $output_dir"
+    echo "--------------------------------------------------"
 
     mkdir -p "$output_dir"
 
-    # Export configuration for the workload script
+    # Export common configuration
     export INTERFERENCE_DURATION=$DURATION
     export SEQ_REGIONS=$SEQ_REGIONS
     export SEQ_REGION_MB=$SEQ_REGION_MB
     export SEQ_THREADS=$SEQ_THREADS
-    export SEQ_DELAY=$seq_delay
-    export SEQ_RUNTIME=$seq_runtime
+    # Delays can be customized per 'launch_experiment' call if we pass them,
+    # but for now using globals or we can add args.
+    # For now, let's assume global SEQ_DELAY/RUNTIME etc unless overridden by caller before calling this.
+    export SEQ_DELAY=${SEQ_DELAY:-0}
+    export SEQ_RUNTIME=${SEQ_RUNTIME:-0}
     export ZIPF_REGION_MB=$ZIPF_REGION_MB
     export ZIPF_THETA=$ZIPF_THETA
     export ZIPF_THREADS=$ZIPF_THREADS
-    export ZIPF_DELAY=$zipf_delay
-    export ZIPF_RUNTIME=$zipf_runtime
-    export REGENT_ANNOTATION_FILE="/users/hjcoffey/workloads/${output_dir}/annotations.txt" # Save annotations for this run
-    # export SEQ_VA_RANGE="${SEQ_VA_RANGE:-"0x7ffde3e00000-0x7ffee3dfffff"}" # Optional: hardcode sequential VA range
+    export ZIPF_DELAY=${ZIPF_DELAY:-0}
+    export ZIPF_RUNTIME=${ZIPF_RUNTIME:-0}
 
-    local target_va_range="${SEQ_VA_RANGE:-"0x7ffde3e00000-0x7ffee3dfffff"}"
+    export REGENT_ANNOTATION_FILE="/users/hjcoffey/workloads/${output_dir}/annotations.txt"
+    export REGENT_TARGET_EXE="micro_interference"
 
-    if [[ "$policy" == "hybrid" ]]; then
-
-    if [[ "$ARMS_POLICY" == "arms" ]]; then
-        target_va_range="0x7ffddbe00000-0x7ffedbdfffff"
-    elif [[ "$ARMS_POLICY" == "lru_ptscan" ]]; then
-        target_va_range="0x7ffde3e00000-0x7ffee3dfffff"
-    fi
-        # Hybrid: ARMS applied only to sequential region (manual or hardcoded)
-        #REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis" \
-        #REGENT_VISUALIZATION=1 \
-        SEQ_VA_RANGE="$target_va_range" \
-        SEQ_ARMS_SIZE=$SEQ_ARMS_SIZE \
-        ARMS_POLICY=$ARMS_POLICY \
-        HYBRID_POLICY=${HYBRID_POLICY:-lru_ptscan} \
-        REGENT_FAST_MEMORY=$FAST_MEM \
-        HEMEMPOL=$LIB_ARMS_PATH \
-        REGENT_ANNOTATION_FILE="${REGENT_ANNOTATION_FILE:-}" \
-        /users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
+    /users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
             -r $ITERATIONS --use-cgroup
-            #-r $ITERATIONS -i pebs -s 500 --record-vma
-    else
-        # Control: Global policy (configured via ARMS_POLICY)
-        echo "Policy: Control (Global $ARMS_POLICY)"
-        #REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis" \
-        #REGENT_VISUALIZATION=1 \
-        ARMS_POLICY=$ARMS_POLICY \
-        SEQ_VA_RANGE="" \
-        HEMEMPOL=$LIB_ARMS_PATH \
-        REGENT_FAST_MEMORY=$FAST_MEM \
-        REGENT_ANNOTATION_FILE="${REGENT_ANNOTATION_FILE:-}" \
-        /users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
-            -r $ITERATIONS --use-cgroup
-            #-r $ITERATIONS -i pebs -s 500 --record-vma
-    fi
-
-    echo "Completed: $name ($policy)"
-    echo ""
 }
 
-run_all_experiments() {
-    local policy="$1"
-    local config_suffix="${ARMS_POLICY:-ARMS}"
-    if [[ "$policy" == "hybrid" ]]; then
-        config_suffix="${config_suffix}_${HYBRID_POLICY:-lru_ptscan}_${SEQ_ARMS_SIZE}"
-    fi
-    local base_dir="$OUTPUT_BASE/${policy}_${config_suffix}"
+run_control_experiment() {
+    local name="$1"
+    local policy="$2"
+    local output_dir="$3"
 
-    echo ""
-    echo "###################################################"
-    echo "# Running all experiments with policy: $policy"
-    echo "###################################################"
-    echo ""
+    echo "=== Running CONTROL Experiment: $name ($policy) ==="
 
-    # Experiment 1: Both patterns for 60s (baseline)
-    run_experiment "both_60s" \
-        0 0 \
-        0 0 \
-        "$base_dir/exp1_both_60s" \
-        "$policy"
+    # Reset REGENT specific envs just in case
+    unset REGENT_REGIONS
+    unset REGENT_NUM_REGIONS
+    unset SEQ_VA_RANGE
 
-    # Experiment 2: Zipfian delayed 2s, runs 2s. Sequential runs 5s.
-#    run_experiment "zipf_delayed" \
-#        0 0 \
-#        2 2 \
-#        "$base_dir/exp2_zipf_delayed" \
-#        "$policy"
-#
-#    # Experiment 3: Sequential delayed 2s, runs 2s. Zipfian runs 5s.
-#    run_experiment "seq_delayed" \
-#        2 2 \
-#        0 0 \
-#        "$base_dir/exp3_seq_delayed" \
-#        "$policy"
+    export ARMS_POLICY=$policy
+    export HEMEMPOL=$LIB_ARMS_PATH
+    export REGENT_FAST_MEMORY=$FAST_MEM
+
+    launch_experiment "$name" "$output_dir"
 }
 
-# =============================================================================
-# MAIN
-# =============================================================================
+run_hybrid_2region_experiment() {
+    local name="$1"
+    local seq_policy="$2"    # Policy for Sequential Region
+    local seq_size="$3"      # Budget for Sequential Region
+    local zipf_policy="$4"   # Policy for Zipfian Region
+    local zipf_size="$5"     # Budget for Zipfian Region
+    local output_dir="$6"
 
-echo "=============================================="
-echo "Micro Interference Experiment Suite"
-echo "=============================================="
-echo "Configuration:"
-echo "  Sequential: ${SEQ_REGIONS} x ${SEQ_REGION_MB}MB = $((SEQ_REGIONS * SEQ_REGION_MB / 1024))GB"
-echo "  Zipfian:    ${ZIPF_REGION_MB}MB = $((ZIPF_REGION_MB / 1024))GB"
-echo "  Threads:    seq=${SEQ_THREADS}, zipf=${ZIPF_THREADS}"
-echo "  Duration:   ${DURATION}s"
-echo "  Iterations: ${ITERATIONS}"
-echo ""
-echo "ARMS Config:"
-echo "  FAST_MEM:      ${FAST_MEM}"
-echo "  SEQ_ARMS_SIZE: ${SEQ_ARMS_SIZE} (hybrid only)"
-echo "=============================================="
-echo ""
+    echo "=== Running HYBRID 2-REGION Experiment: $name ==="
+
+    local target_va_range="0x7ffde3e00000-0x7ffee3dfffff"
+
+    # Layout:
+    # Region 0: Sequential -> seq_policy : seq_size
+    # Region 1: Zipfian    -> zipf_policy : zipf_size
+
+    export REGENT_REGIONS="${seq_policy}:${target_va_range}:${seq_size};${zipf_policy}:0-0:${zipf_size}"
+    export REGENT_NUM_REGIONS=2
+
+    export ARMS_POLICY="hybrid"
+    export HEMEMPOL=$LIB_ARMS_PATH
+    export REGENT_FAST_MEMORY=$FAST_MEM
+
+
+    launch_experiment "$name" "$output_dir"
+}
+
+run_hybrid_3region_experiment() {
+    local name="$1"
+    local seq_policy="$2"
+    local seq_size="$3"
+    local zipf1_policy="$4"
+    local zipf1_size="$5"
+    local zipf2_policy="$6"
+    local zipf2_size="$7"
+    local output_dir="$8"
+
+    echo "=== Running HYBRID 3-REGION Experiment: $name ==="
+
+    local target_va_range="0x7ffde3e00000-0x7ffee3dfffff"
+
+    # Layout:
+    # Region 0: Seq   -> seq_policy : seq_size
+    # Region 1: Zipf1 -> zipf1_policy : zipf1_size
+    # Region 2: Zipf2 -> zipf2_policy : zipf2_size
+
+    export REGENT_REGIONS="${seq_policy}:${target_va_range}:${seq_size};${zipf1_policy}:0-0:${zipf1_size};${zipf2_policy}:0-0:${zipf2_size}"
+    export REGENT_NUM_REGIONS=3
+
+    export HEMEMPOL=$LIB_ARMS_PATH
+    export REGENT_FAST_MEMORY=$FAST_MEM
+
+    launch_experiment "$name" "$output_dir"
+}
+# =============================================================================
 
 mkdir -p "$OUTPUT_BASE"
 
 # =============================================================================
 # RUN SCENARIOS
 # =============================================================================
+run_hybrid_2region_experiment "hybrid_2reg_lru_arms_l_v2" \
+    "lru_ptscan" "512M" "arms_long" "3.5G" \
+    "$OUTPUT_BASE/hybrid_2reg_lru_arms_l_v2"
 
-# 1. Controls
-#echo "Running Control Scenarios..."
+run_hybrid_2region_experiment "hybrid_2reg_lru_arms_l_v2" \
+    "lru_ptscan" "512M" "arms_short" "3.5G" \
+    "$OUTPUT_BASE/hybrid_2reg_lru_arms_s_v2"
+
+exit
+echo "Running Hybrid 2-Region Scenario (arms/arms)..."
+run_hybrid_2region_experiment "hybrid_2reg_arms_arms_v2" \
+    "arms" "512M" "arms" "3.5G" \
+    "$OUTPUT_BASE/hybrid_2reg_arms_arms_v2"
+
+echo "Running Hybrid 2-Region Scenario (arms/arms)..."
+run_hybrid_2region_experiment "hybrid_2reg_arms_s_arms_l_v2" \
+    "arms_short" "512M" "arms_long" "3.5G" \
+    "$OUTPUT_BASE/hybrid_2reg_arms_s_arms_l_v2"
+
+exit
+
+# 2. Controls (Global Policy)
+echo "Running Control Scenarios..."
 #for pol in "lru_ptscan"; do
 for pol in "ARMS" "lru_ptscan"; do
-    export ARMS_POLICY=$pol
-    run_all_experiments "control"
+    run_control_experiment "control_${pol}" "$pol" "$OUTPUT_BASE/control_${pol}"
 done
 
-# 2. Hybrids
-echo "Running Hybrid Scenarios..."
-##
- #Scenario A: Base=ARMS, Hybrid=lru_ptscan
-export ARMS_POLICY="arms"
-export HYBRID_POLICY="lru_ptscan"
-for size in "128M" "256M" "512M" "1G"; do
-    export SEQ_ARMS_SIZE="$size"
-    run_all_experiments "hybrid"
-done
+## 1. Custom Scenario C (3 Regions)
+## Seq: lru_ptscan, Zipf1: pin_fast (1.5G), Zipf2: pin_slow
+#echo "Running Scenario C (3 Regions)..."
+#run_hybrid_3region_experiment "hybrid_scenario_c" \
+#    "lru_ptscan" "128M" "pin_fast" "1G" "pin_slow" "0G" \
+#    "$OUTPUT_BASE/hybrid_scenario_c"
 #
-# Scenario B: Base=lru_ptscan, Hybrid=ARMS
-export ARMS_POLICY="lru_ptscan"
-export HYBRID_POLICY="ARMS"
-for size in "128M" "256M" "512M" "1G"; do
-    export SEQ_ARMS_SIZE="$size"
-    run_all_experiments "hybrid"
-done
+##echo "Running Scenario D (3 Regions)..."
+#run_hybrid_3region_experiment "hybrid_scenario_d" \
+#    "lru_ptscan" "256M" "pin_fast" "1G" "ARMS" "0.75G" \
+#    "$OUTPUT_BASE/hybrid_scenario_d"
+#
+#echo "Running Scenario E (3 Regions)..."
+## export SEQ_ARMS_SIZE="128M" # Passed as arg now
+## I thought maybe ARMS was inducing PEBS overhead, so removing
+## arms from policies would improve general performance, but no such luck.
+## Slightly better sequential (still 10% performance hit, and much worse zipfian)
+#
+#run_hybrid_3region_experiment "hybrid_scenario_e" \
+#    "lru_ptscan" "256M" "pin_fast" "1G" "lru_ptscan" "0.75G" \
+#    "$OUTPUT_BASE/hybrid_scenario_e"
+
+# 3. Hybrid 2 Regions (LRU + LRU)
+#echo "Running Hybrid 2-Region Scenario (LRU/LRU)..."
+#run_hybrid_2region_experiment "hybrid_2reg_lru_lru" \
+#    "lru_ptscan" "256M" "lru_ptscan" "1.75G" \
+#    "$OUTPUT_BASE/hybrid_2reg_lru_lru"
+##
+#echo "Running Hybrid 2-Region Scenario (LRU/ARMS)..."
+#run_hybrid_2region_experiment "hybrid_2reg_lru_arms" \
+#    "lru_ptscan" "256M" "ARMS" "1.75G" \
+#    "$OUTPUT_BASE/hybrid_2reg_lru_arms"
+
+##
+## Scenario B: Base=lru_ptscan, Hybrid=ARMS
+#export ARMS_POLICY="lru_ptscan"
+#export HYBRID_POLICY="ARMS"
+#for size in "128M" "256M" "512M" "1G"; do
+#    export SEQ_ARMS_SIZE="$size"
+#    run_all_experiments "hybrid"
+#done
+
+# Scenario C: Base=pin_fast, Hybrid=pin_slow
+#export ARMS_POLICY="pin_fast"
+#export HYBRID_POLICY="pin_slow"
+##for size in "128M" "256M" "512M" "1G"; do
+#export SEQ_ARMS_SIZE="128M"
+#run_all_experiments "hybrid"
+##done
 
 echo "=============================================="
 echo "All experiments completed!"

@@ -18,10 +18,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <fstream>
 
-// Function to update Regent's view of Region 0
-void update_regent_region_0(uint64_t seq_start, uint64_t seq_end) {
-    const char* bounds_file = "/tmp/regent/region_0/bounds";
+std::chrono::steady_clock::time_point g_start_time;
+
+// Function to update Regent's view of a Region
+void update_regent_region(int region_id, uint64_t start, uint64_t end) {
+    char dir_path[256];
+    snprintf(dir_path, sizeof(dir_path), "/tmp/regent/region_%d", region_id);
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s", dir_path);
+    int ret = system(cmd);
+    if (ret != 0) {
+        std::cerr << "Failed to create directory: " << dir_path << "\n";
+    }
+
+    char bounds_file[256];
+    snprintf(bounds_file, sizeof(bounds_file), "%s/bounds", dir_path);
 
     // Open the bounds file for writing (truncating existing content)
     FILE* f = fopen(bounds_file, "w");
@@ -32,10 +46,26 @@ void update_regent_region_0(uint64_t seq_start, uint64_t seq_end) {
 
     // Write the new range in Hex format: START-END
     // usage of %lx for unsigned long (uint64_t usually)
-    fprintf(f, "%lx-%lx\n", seq_start, seq_end);
+    fprintf(f, "%lx-%lx\n", start, end);
 
     fclose(f);
-    printf("Updated Regent Region 0 bounds to 0x%lx - 0x%lx\n", seq_start, seq_end);
+    printf("Updated Regent Region %d bounds to 0x%lx - 0x%lx\n", region_id, start, end);
+}
+
+// Function to log annotation events if REGENT_ANNOTATION_FILE is set
+void annotate_event(const std::string& msg) {
+    const char* env_path = getenv("REGENT_ANNOTATION_FILE");
+    if (!env_path) return;
+
+    std::ofstream outfile;
+    outfile.open(env_path, std::ios_base::app); // Append mode
+    if (outfile.is_open()) {
+        auto now = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed = now - g_start_time;
+
+        outfile << std::fixed << std::setprecision(6) << elapsed.count() << " " << msg << "\n";
+        outfile.close();
+    }
 }
 
 // =============================================================================
@@ -332,6 +362,8 @@ static void print_usage(const char* prog) {
 // =============================================================================
 
 int main(int argc, char** argv) {
+    g_start_time = std::chrono::steady_clock::now();
+
     // --- Defaults ---
     double duration_sec = 30.0;
     int sample_period_ms = 1000;
@@ -449,6 +481,7 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to allocate total memory region\n";
         return 1;
     }
+    annotate_event("Allocated global region");
     std::cout << "Allocated global region: " << (total_size / (1024*1024)) << " MB\n";
 
     // --- Slice Sequential Regions ---
@@ -460,6 +493,7 @@ int main(int argc, char** argv) {
         touch_region(r, page_stride); // Prefault
         cursor += seq_bytes_aligned;
     }
+    annotate_event("Touched sequential regions");
     std::cout << "Allocated " << seq_regions << " sequential regions (sliced)\n";
 
     // --- Slice Zipfian Region ---
@@ -473,6 +507,7 @@ int main(int argc, char** argv) {
         cursor += zipf_bytes_aligned;
 
         touch_region(zipf_region, page_stride); // Prefault
+        annotate_event("Touched zipfian region");
         std::cout << "Allocated zipfian region: " << zipf_region_mb << " MB (sliced)\n";
     }
 
@@ -492,7 +527,8 @@ int main(int argc, char** argv) {
         }
         std::cout << "  Start: 0x" << std::hex << seq_start << std::dec << "\n";
         std::cout << "  End:   0x" << std::hex << seq_end << std::dec << "\n";
-        update_regent_region_0(seq_start, seq_end);
+        sleep(10);
+        update_regent_region(0, seq_start, seq_end);
     }
     if (zipf_region.buf) {
         std::cout << "Zipfian Zone (" << zipf_region_mb << " MB):\n";
@@ -500,6 +536,34 @@ int main(int argc, char** argv) {
         uintptr_t zipf_end = zipf_start + zipf_region.bytes - 1;
         std::cout << "  Start: 0x" << std::hex << zipf_start << std::dec << "\n";
         std::cout << "  End:   0x" << std::hex << zipf_end << std::dec << "\n";
+
+        // Check REGENT_NUM_REGIONS env var to determine how to split/report regions
+        const char* num_regions_env = getenv("REGENT_NUM_REGIONS");
+        int num_regent_regions = 3; // Default to current behavior
+        if (num_regions_env) {
+            num_regent_regions = std::atoi(num_regions_env);
+        }
+
+        if (num_regent_regions == 2) {
+            // Case 2 Regions: Region 0 (Seq), Region 1 (Entire Zipf)
+            update_regent_region(1, zipf_start, zipf_end);
+        } else {
+            // Case 3 Regions: Region 0 (Seq), Region 1 (First 1.5GB Zipf), Region 2 (Rest Zipf)
+            // Region 1: First 1.5GB
+            uintptr_t r1_start = zipf_start;
+            size_t r1_size = 1 * 1024UL * 1024UL * 1024UL;
+            if (r1_size > zipf_region.bytes) r1_size = zipf_region.bytes;
+            uintptr_t r1_end = r1_start + r1_size - 1;
+
+            update_regent_region(1, r1_start, r1_end);
+
+            // Region 2: Remainder
+            if (zipf_region.bytes > r1_size) {
+                uintptr_t r2_start = r1_end + 1;
+                uintptr_t r2_end = zipf_end;
+                update_regent_region(2, r2_start, r2_end);
+            }
+        }
     }
     std::cout << "=====================================\n\n";
 
@@ -591,6 +655,7 @@ int main(int argc, char** argv) {
     for (auto& t : threads) {
         t.join();
     }
+    annotate_event("All workers joined");
 
     // --- Final stats ---
     uint64_t final_seq = seq_ops.load();

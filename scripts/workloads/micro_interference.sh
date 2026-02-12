@@ -18,7 +18,7 @@ config_micro_interference() {
     SEQ_STRIDE="${SEQ_STRIDE:-64}"                  # Access stride (bytes)
     SEQ_DELAY="${SEQ_DELAY:-0}"                       # Delay before starting (seconds)
     SEQ_RUNTIME="${SEQ_RUNTIME:-0}"                   # Runtime (0 = global duration)
-    SEQ_ITERS="${SEQ_ITERS:-2}"                       # Iterations per region
+    SEQ_ITERS="${SEQ_ITERS:-1}"                       # Iterations per region
     SEQ_THREADS="${SEQ_THREADS:-8}"                   # Number of threads
 
     # Zipfian pattern settings (16GB)
@@ -55,7 +55,10 @@ run_micro_interference() {
     fi
 
     local extra_envs=""
-    if [[ -n "${SEQ_VA_RANGE:-}" ]]; then
+    if [[ -n "${REGENT_REGIONS:-}" ]]; then
+        echo "Using provided REGENT_REGIONS: $REGENT_REGIONS"
+        extra_envs="export REGENT_REGIONS=\"$REGENT_REGIONS\""
+    elif [[ -n "${SEQ_VA_RANGE:-}" ]]; then
         local hybrid_pol="${HYBRID_POLICY:-lru_ptscan}"
         local regent_regions="${hybrid_pol}:${SEQ_VA_RANGE}:${SEQ_ARMS_SIZE:-128M}"
         echo "Using Hardcoded Sequential VA Range: $SEQ_VA_RANGE"
@@ -78,6 +81,15 @@ run_micro_interference() {
         fi
         extra_envs+="export REGENT_ANNOTATION_FILE=\"$anno_file\""
     fi
+
+    if [[ -n "${REGENT_NUM_REGIONS:-}" ]]; then
+        if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
+        extra_envs+="export REGENT_NUM_REGIONS=\"$REGENT_NUM_REGIONS\""
+    fi
+
+    # Always use huge pages
+    if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
+    extra_envs+="export USE_HUGETLB=0"
 
     generate_workload_filenames "$workload"
 
