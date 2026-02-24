@@ -61,3 +61,6 @@
 [submodule "DCPerf"]
 	path = DCPerf
 	url = https://github.com/facebookresearch/DCPerf.git
+[submodule "llama.cpp"]
+	path = llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
