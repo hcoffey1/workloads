@@ -6,12 +6,18 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 # =============================================================================
 # llama.cpp Workload Script
 # =============================================================================
-# Runs llama-bench (or llama-cli / llama-perplexity) for LLM inference
-# benchmarking.  The workload parameter selects the binary:
-#   llama-bench      – throughput benchmark  (default)
-#   llama-cli        – interactive / batch inference
-#   llama-perplexity – perplexity evaluation
+# Runs llama.cpp binaries for LLM inference benchmarking.
+# The workload parameter selects the binary:
+#   llama-bench / llama_cpp  – throughput benchmark  (default)
+#   llama-cli                – interactive / batch inference
+#   llama-perplexity         – perplexity evaluation
+#   llama-server / llama_server – multi-session serving benchmark
+#       (llama-server starts the C++ server; a Python client drives load.
+#        workload_pid = server PID, so PEBS instruments the right binary.)
 # =============================================================================
+
+# ---- internal state for llama-server mode ----
+_LLAMA_SERVER_BENCH_PID=""
 
 config_llama_cpp() {
     # ---- Model ----
@@ -41,6 +47,16 @@ config_llama_cpp() {
 
     # ---- llama-perplexity specific ----
     LLAMA_PPL_DATASET="${LLAMA_PPL_DATASET:-}"       # path to dataset txt
+
+    # ---- llama-server specific (used when workload=llama-server) ----
+    LLAMA_SERVER_HOST="${LLAMA_SERVER_HOST:-127.0.0.1}"
+    LLAMA_SERVER_PORT="${LLAMA_SERVER_PORT:-8080}"
+    LLAMA_SERVER_PARALLEL="${LLAMA_SERVER_PARALLEL:-4}"       # concurrent serving slots
+    LLAMA_SERVER_N_PREDICT="${LLAMA_SERVER_N_PREDICT:-128}"   # max tokens per request
+    LLAMA_SERVER_CLIENTS="${LLAMA_SERVER_CLIENTS:-$LLAMA_SERVER_PARALLEL}"
+    LLAMA_SERVER_ROUNDS="${LLAMA_SERVER_ROUNDS:-3}"
+    LLAMA_SERVER_PROMPT_TOKENS="${LLAMA_SERVER_PROMPT_TOKENS:-128}"
+    LLAMA_SERVER_GEN_TOKENS="${LLAMA_SERVER_GEN_TOKENS:-64}"
 }
 
 build_llama_cpp() {
@@ -88,7 +104,16 @@ run_llama_cpp() {
         workload="llama-bench"
     fi
 
-    local bin="$bin_dir/$workload"
+    # Normalize underscore to hyphen for binary lookup
+    local workload_normalized="${workload//_/-}"
+
+    # Dispatch llama-server to its own handler
+    if [[ "$workload_normalized" == "llama-server" ]]; then
+        _run_llama_server
+        return $?
+    fi
+
+    local bin="$bin_dir/$workload_normalized"
 
     if [[ ! -x "$bin" ]]; then
         echo "ERROR: Binary not found at $bin"
@@ -174,7 +199,143 @@ run_strace_llama_cpp() {
     return
 }
 
+# =============================================================================
+# llama-server mode: internal handler
+# =============================================================================
+_run_llama_server() {
+    local server_bin="$CUR_PATH/llama.cpp/build/bin/llama-server"
+    local bench_script="$CUR_PATH/scripts/workloads/vllm_bench_client.py"
+
+    if [[ ! -x "$server_bin" ]]; then
+        echo "ERROR: llama-server binary not found at $server_bin"
+        return 1
+    fi
+
+    # ---- Build server command line ----
+    local server_args=""
+    server_args="$server_args -m $LLAMA_MODEL"
+    server_args="$server_args -t $LLAMA_THREADS"
+    server_args="$server_args -c $LLAMA_CTX_SIZE"
+    server_args="$server_args -np $LLAMA_SERVER_PARALLEL"
+    server_args="$server_args -n $LLAMA_SERVER_N_PREDICT"
+    server_args="$server_args -ngl $LLAMA_N_GPU_LAYERS"
+    server_args="$server_args --host $LLAMA_SERVER_HOST"
+    server_args="$server_args --port $LLAMA_SERVER_PORT"
+    server_args="$server_args --no-mmap"
+    server_args="$server_args --metrics"
+
+    # ---- Generate standard filenames ----
+    generate_workload_filenames "llama_server"
+
+    local server_stderr="${OUTPUT_DIR}/llama_server_stderr.txt"
+
+    # ---- Start llama-server via wrapper (LD_PRELOAD + PEBS track this PID) ----
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" \
+        "$server_bin" "$server_args" "export USE_HUGETLB=0"
+
+    echo "Starting llama-server (${LLAMA_SERVER_PARALLEL} parallel slots)..."
+
+    set +e
+    sudo numactl --cpunodebind=0 -p 0 \
+        /usr/bin/time -v -o "$TIMEFILE" \
+        "$WRAPPER" \
+        1> /dev/null 2> "$server_stderr" &
+
+    # Wait for server PID
+    local count=0
+    while [ ! -s "$PIDFILE" ] && [ $count -lt 1000 ]; do
+        sleep 0.01
+        count=$((count + 1))
+    done
+    set -e
+
+    if [ ! -s "$PIDFILE" ]; then
+        echo "ERROR: Timeout waiting for server PID file"
+        return 1
+    fi
+
+    # workload_pid = server PID (C++ binary with all model memory)
+    # PEBS instruments THIS process, not the Python client.
+    workload_pid=$(cat "$PIDFILE")
+    echo "llama-server PID (workload_pid): $workload_pid"
+
+    if [[ "${USE_CGROUP:-0}" == "1" ]]; then
+        echo "Adding server PID $workload_pid to experiment cgroup"
+        add_to_cgroup "$workload_pid" || true
+    fi
+
+    rm -f "$WRAPPER" "$PIDFILE"
+
+    # ---- Wait for server health endpoint ----
+    echo "Waiting for server to become ready..."
+    local ready=0
+    local attempt=0
+    while [ $attempt -lt 120 ]; do
+        if curl -sf "http://${LLAMA_SERVER_HOST}:${LLAMA_SERVER_PORT}/health" >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    if [[ $ready -ne 1 ]]; then
+        echo "ERROR: llama-server did not become ready within 120 seconds"
+        echo "Server stderr:"
+        tail -20 "$server_stderr"
+        return 1
+    fi
+    echo "Server ready after ~${attempt}s."
+
+    # ---- Launch benchmark client in background ----
+    local bench_args=""
+    bench_args="$bench_args --host $LLAMA_SERVER_HOST"
+    bench_args="$bench_args --port $LLAMA_SERVER_PORT"
+    bench_args="$bench_args --clients $LLAMA_SERVER_CLIENTS"
+    bench_args="$bench_args --rounds $LLAMA_SERVER_ROUNDS"
+    bench_args="$bench_args --prompt-tokens $LLAMA_SERVER_PROMPT_TOKENS"
+    bench_args="$bench_args --gen-tokens $LLAMA_SERVER_GEN_TOKENS"
+
+    local json_output="${OUTPUT_DIR}/llama_server_bench_iter${CURRENT_ITERATION:-0}.json"
+    local bench_stdout="${OUTPUT_DIR}/llama_server_bench_stdout.txt"
+    local bench_stderr="${OUTPUT_DIR}/llama_server_bench_stderr.txt"
+
+    echo "Launching benchmark client ($LLAMA_SERVER_CLIENTS concurrent, $LLAMA_SERVER_ROUNDS rounds)..."
+    VLLM_BENCH_JSON_OUTPUT="$json_output" \
+        python3 "$bench_script" $bench_args \
+        1> "$bench_stdout" 2> "$bench_stderr" &
+    _LLAMA_SERVER_BENCH_PID=$!
+    echo "Benchmark client PID: $_LLAMA_SERVER_BENCH_PID"
+
+    start_bwmon
+
+    # ---- Wait for benchmark client to finish ----
+    echo "Waiting for benchmark client to finish..."
+    wait $_LLAMA_SERVER_BENCH_PID 2>/dev/null || true
+    _LLAMA_SERVER_BENCH_PID=""
+    echo "Benchmark client finished."
+
+    if [[ -f "$bench_stdout" ]]; then
+        echo "--- Benchmark Results ---"
+        cat "$bench_stdout"
+        echo "--- End Results ---"
+    fi
+
+    # Kill the server now that the benchmark is done
+    echo "Stopping llama-server (PID $workload_pid)..."
+    sudo kill "$workload_pid" 2>/dev/null || true
+    sleep 1
+    sudo kill -9 "$workload_pid" 2>/dev/null || true
+}
+
 clean_llama_cpp() {
     stop_bwmon || true
-    return
+
+    # Kill benchmark client if still running (llama-server mode)
+    if [[ -n "${_LLAMA_SERVER_BENCH_PID:-}" ]]; then
+        kill "$_LLAMA_SERVER_BENCH_PID" 2>/dev/null || true
+        _LLAMA_SERVER_BENCH_PID=""
+    fi
+
+    # Kill any remaining llama-server processes
+    sudo killall llama-server 2>/dev/null || true
 }
