@@ -28,13 +28,11 @@ ZIPF_THREADS=8
 
 # ARMS configuration
 FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
-SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
-ITERATIONS="${ITERATIONS:-5}"
+#SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
+ITERATIONS="${ITERATIONS:-1}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/arms/libarms_kernel.so}"
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
 
-#export REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis"
-#export REGENT_VISUALIZATION=1
 
 # Output directory
 OUTPUT_BASE="${OUTPUT_BASE:-results_interference}"
@@ -55,6 +53,8 @@ launch_experiment() {
     mkdir -p "$output_dir"
 
     # Export common configuration
+    export REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis"
+    export REGENT_VISUALIZATION=1
     export INTERFERENCE_DURATION=$DURATION
     export SEQ_REGIONS=$SEQ_REGIONS
     export SEQ_REGION_MB=$SEQ_REGION_MB
@@ -72,7 +72,9 @@ launch_experiment() {
 
     export REGENT_ANNOTATION_FILE="/users/hjcoffey/workloads/${output_dir}/annotations.txt"
     export REGENT_TARGET_EXE="micro_interference"
+    #export REGENT_TARGET_EXE="bc"
 
+    #/users/hjcoffey/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
     /users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
             -r $ITERATIONS --use-cgroup
 }
@@ -157,83 +159,37 @@ mkdir -p "$OUTPUT_BASE"
 # =============================================================================
 # RUN SCENARIOS
 # =============================================================================
-run_hybrid_2region_experiment "hybrid_2reg_lru_arms_l_v2" \
-    "lru_ptscan" "512M" "arms_long" "3.5G" \
-    "$OUTPUT_BASE/hybrid_2reg_lru_arms_l_v2"
 
-run_hybrid_2region_experiment "hybrid_2reg_lru_arms_l_v2" \
-    "lru_ptscan" "512M" "arms_short" "3.5G" \
-    "$OUTPUT_BASE/hybrid_2reg_lru_arms_s_v2"
-
-exit
-echo "Running Hybrid 2-Region Scenario (arms/arms)..."
-run_hybrid_2region_experiment "hybrid_2reg_arms_arms_v2" \
-    "arms" "512M" "arms" "3.5G" \
-    "$OUTPUT_BASE/hybrid_2reg_arms_arms_v2"
-
-echo "Running Hybrid 2-Region Scenario (arms/arms)..."
-run_hybrid_2region_experiment "hybrid_2reg_arms_s_arms_l_v2" \
-    "arms_short" "512M" "arms_long" "3.5G" \
-    "$OUTPUT_BASE/hybrid_2reg_arms_s_arms_l_v2"
-
-exit
-
-# 2. Controls (Global Policy)
+# ---------------------------------------------------------------------------
+# 1. Controls (Global Policy)
+# ---------------------------------------------------------------------------
 echo "Running Control Scenarios..."
-#for pol in "lru_ptscan"; do
 for pol in "ARMS" "lru_ptscan"; do
     run_control_experiment "control_${pol}" "$pol" "$OUTPUT_BASE/control_${pol}"
 done
 
-## 1. Custom Scenario C (3 Regions)
-## Seq: lru_ptscan, Zipf1: pin_fast (1.5G), Zipf2: pin_slow
-#echo "Running Scenario C (3 Regions)..."
-#run_hybrid_3region_experiment "hybrid_scenario_c" \
-#    "lru_ptscan" "128M" "pin_fast" "1G" "pin_slow" "0G" \
-#    "$OUTPUT_BASE/hybrid_scenario_c"
-#
-##echo "Running Scenario D (3 Regions)..."
-#run_hybrid_3region_experiment "hybrid_scenario_d" \
-#    "lru_ptscan" "256M" "pin_fast" "1G" "ARMS" "0.75G" \
-#    "$OUTPUT_BASE/hybrid_scenario_d"
-#
-#echo "Running Scenario E (3 Regions)..."
-## export SEQ_ARMS_SIZE="128M" # Passed as arg now
-## I thought maybe ARMS was inducing PEBS overhead, so removing
-## arms from policies would improve general performance, but no such luck.
-## Slightly better sequential (still 10% performance hit, and much worse zipfian)
-#
-#run_hybrid_3region_experiment "hybrid_scenario_e" \
-#    "lru_ptscan" "256M" "pin_fast" "1G" "lru_ptscan" "0.75G" \
-#    "$OUTPUT_BASE/hybrid_scenario_e"
+# ---------------------------------------------------------------------------
+# 2. Hybrid 2-Region Experiments
+# ---------------------------------------------------------------------------
+echo "Running Hybrid 2-Region Scenario (ARMS / ARMS)..."
+run_hybrid_2region_experiment "hybrid_2reg_arms_arms" \
+    "ARMS" "256M" "ARMS" "1.75G" \
+    "$OUTPUT_BASE/hybrid_2reg_arms_arms"
 
-# 3. Hybrid 2 Regions (LRU + LRU)
-#echo "Running Hybrid 2-Region Scenario (LRU/LRU)..."
-#run_hybrid_2region_experiment "hybrid_2reg_lru_lru" \
-#    "lru_ptscan" "256M" "lru_ptscan" "1.75G" \
-#    "$OUTPUT_BASE/hybrid_2reg_lru_lru"
-##
-#echo "Running Hybrid 2-Region Scenario (LRU/ARMS)..."
-#run_hybrid_2region_experiment "hybrid_2reg_lru_arms" \
-#    "lru_ptscan" "256M" "ARMS" "1.75G" \
-#    "$OUTPUT_BASE/hybrid_2reg_lru_arms"
+echo "Running Hybrid 2-Region Scenario (lru_ptscan / ARMS)..."
+run_hybrid_2region_experiment "hybrid_2reg_lru_arms" \
+    "lru_ptscan" "256M" "ARMS" "1.75G" \
+    "$OUTPUT_BASE/hybrid_2reg_lru_arms"
 
-##
-## Scenario B: Base=lru_ptscan, Hybrid=ARMS
-#export ARMS_POLICY="lru_ptscan"
-#export HYBRID_POLICY="ARMS"
-#for size in "128M" "256M" "512M" "1G"; do
-#    export SEQ_ARMS_SIZE="$size"
-#    run_all_experiments "hybrid"
-#done
+echo "Running Hybrid 2-Region Scenario (ARMS / lru_ptscan)..."
+run_hybrid_2region_experiment "hybrid_2reg_arms_lru" \
+    "ARMS" "256M" "lru_ptscan" "1.75G" \
+    "$OUTPUT_BASE/hybrid_2reg_arms_lru"
 
-# Scenario C: Base=pin_fast, Hybrid=pin_slow
-#export ARMS_POLICY="pin_fast"
-#export HYBRID_POLICY="pin_slow"
-##for size in "128M" "256M" "512M" "1G"; do
-#export SEQ_ARMS_SIZE="128M"
-#run_all_experiments "hybrid"
-##done
+echo "Running Hybrid 2-Region Scenario (arms_short / arms_long)..."
+run_hybrid_2region_experiment "hybrid_2reg_arms_short_arms_long" \
+    "arms_short" "256M" "arms_long" "1.75G" \
+    "$OUTPUT_BASE/hybrid_2reg_arms_short_arms_long"
 
 echo "=============================================="
 echo "All experiments completed!"

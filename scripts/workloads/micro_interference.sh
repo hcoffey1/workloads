@@ -9,22 +9,22 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_micro_interference() {
     # Global settings
-    INTERFERENCE_DURATION="${INTERFERENCE_DURATION:-600}"           # Total benchmark duration (seconds)
+    INTERFERENCE_DURATION="${INTERFERENCE_DURATION:-60}"           # Total benchmark duration (seconds)
     INTERFERENCE_SAMPLE_PERIOD="${INTERFERENCE_SAMPLE_PERIOD:-1000}" # Sampling period (ms)
 
     # Sequential pattern settings (8 x 2GB = 16GB)
-    SEQ_REGIONS="${SEQ_REGIONS:-32}"                   # Number of sequential regions
-    SEQ_REGION_MB="${SEQ_REGION_MB:-128}"            # Size of each region (MB) = 2GB
+    SEQ_REGIONS="${SEQ_REGIONS:-64}"                   # Number of sequential regions
+    SEQ_REGION_MB="${SEQ_REGION_MB:-64}"            # Size of each region (MB) = 2GB
     SEQ_STRIDE="${SEQ_STRIDE:-64}"                  # Access stride (bytes)
     SEQ_DELAY="${SEQ_DELAY:-0}"                       # Delay before starting (seconds)
     SEQ_RUNTIME="${SEQ_RUNTIME:-0}"                   # Runtime (0 = global duration)
-    SEQ_ITERS="${SEQ_ITERS:-1}"                       # Iterations per region
+    SEQ_PHASE_DURATION="${SEQ_PHASE_DURATION:-3}"             # Seconds per sequential region
     SEQ_THREADS="${SEQ_THREADS:-8}"                   # Number of threads
 
     # Zipfian pattern settings (16GB)
     ZIPF_REGION_MB="${ZIPF_REGION_MB:-4096}"         # Zipfian region size = 16GB
     ZIPF_ITEM_SIZE="${ZIPF_ITEM_SIZE:-4096}"          # Item size (bytes)
-    ZIPF_THETA="${ZIPF_THETA:-0.75}"                  # Skew parameter
+    ZIPF_THETA="${ZIPF_THETA:-0.8}"                  # Skew parameter
     ZIPF_DELAY="${ZIPF_DELAY:-0}"                     # Delay before starting (seconds)
     ZIPF_RUNTIME="${ZIPF_RUNTIME:-0}"                 # Runtime (0 = global duration)
     ZIPF_THREADS="${ZIPF_THREADS:-8}"                 # Number of threads
@@ -103,7 +103,7 @@ run_micro_interference() {
     args="$args --seq-stride $SEQ_STRIDE"
     args="$args --seq-delay $SEQ_DELAY"
     args="$args --seq-runtime $SEQ_RUNTIME"
-    args="$args --seq-iters $SEQ_ITERS"
+    args="$args --seq-phase-duration $SEQ_PHASE_DURATION"
     args="$args --seq-threads $SEQ_THREADS"
 
     # Zipfian args

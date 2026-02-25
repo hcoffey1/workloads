@@ -21,6 +21,7 @@
 #include <fstream>
 
 std::chrono::steady_clock::time_point g_start_time;
+std::chrono::steady_clock::time_point g_phase_start_time;
 
 // Function to update Regent's view of a Region
 void update_regent_region(int region_id, uint64_t start, uint64_t end) {
@@ -194,7 +195,7 @@ static void touch_region(const Region& r, size_t stride) {
 struct WorkerConfig {
     double delay_sec;      // Delay before starting (seconds)
     double runtime_sec;    // How long to run (0 = until global stop)
-    size_t phase_iters;    // Number of iterations per region before moving to next (default: 1)
+    double phase_duration; // Seconds to spend on each sequential region before moving to next
 };
 
 // =============================================================================
@@ -232,6 +233,17 @@ static void sequential_worker(
     auto start_time = Clock::now();
     auto runtime_ms = static_cast<int64_t>(config.runtime_sec * 1000);
 
+    // Time-based phase synchronization:
+    // All workers reference g_phase_start_time (set in main before thread launch).
+    // Each worker tracks its own phase iteration counter `i`. It advances to
+    // the next region when:
+    //   (thread_now - g_phase_start_time) > phase_duration * i + phase_duration
+    // i.e. (thread_now - g_phase_start_time) > phase_duration * (i + 1)
+    size_t phase_iteration = 0;
+    size_t num_regions = regions.size();
+    size_t region_idx = 0;
+    double phase_dur = config.phase_duration;
+
     while (!global_stop.load(std::memory_order_relaxed)) {
         // Check runtime limit
         if (config.runtime_sec > 0) {
@@ -241,27 +253,39 @@ static void sequential_worker(
             }
         }
 
-        // Sweep through all regions
-        for (const auto& region : regions) {
-            if (global_stop.load(std::memory_order_relaxed)) break;
+        // Check if we need to advance to the next region based on elapsed time
+        auto now = Clock::now();
+        double elapsed_since_phase_start = std::chrono::duration<double>(now - g_phase_start_time).count();
+        if (elapsed_since_phase_start > phase_dur * (phase_iteration + 1)) {
+            phase_iteration++;
+            region_idx = phase_iteration % num_regions;
+        }
 
-            for (size_t iter = 0; iter < config.phase_iters; iter++) {
+        // Access the current region
+        const auto& region = regions[region_idx];
+        volatile char* p = region.buf;
+        size_t num_accesses = region.bytes / stride;
+        if (num_accesses == 0 && region.bytes > 0) num_accesses = 1;
+
+        if (num_accesses > 0) {
+            std::uniform_int_distribution<size_t> dist(0, num_accesses - 1);
+            for (size_t i = 0; i < num_accesses; i++) {
                 if (global_stop.load(std::memory_order_relaxed)) break;
 
-                volatile char* p = region.buf;
-                size_t num_accesses = region.bytes / stride;
-                if (num_accesses == 0 && region.bytes > 0) num_accesses = 1;
+                // Re-check phase transition periodically within inner loop
+                auto inner_now = Clock::now();
+                double inner_elapsed = std::chrono::duration<double>(inner_now - g_phase_start_time).count();
+                if (inner_elapsed > phase_dur * (phase_iteration + 1)) {
+                    phase_iteration++;
+                    region_idx = phase_iteration % num_regions;
+                    break; // Break out to restart with the new region
+                }
 
-                if (num_accesses > 0) {
-                    std::uniform_int_distribution<size_t> dist(0, num_accesses - 1);
-                    for (size_t i = 0; i < num_accesses; i++) {
-                        size_t idx = dist(rng);
-                        size_t offset = idx * stride;
-                        if (offset < region.bytes) {
-                            p[offset]++;
-                            op_counter.fetch_add(1, std::memory_order_relaxed);
-                        }
-                    }
+                size_t idx = dist(rng);
+                size_t offset = idx * stride;
+                if (offset < region.bytes) {
+                    p[offset]++;
+                    op_counter.fetch_add(1, std::memory_order_relaxed);
                 }
             }
         }
@@ -340,7 +364,7 @@ static void print_usage(const char* prog) {
               << "  --sample-period <ms>     Throughput sampling period in ms (default: 1000)\n"
               << "\nSequential Pattern Options:\n"
               << "  --seq-regions <n>        Number of sequential regions (default: 2)\n"
-              << "  --seq-iters <n>          Iterations per region (default: 1)\n"
+              << "  --seq-phase-duration <s> Seconds per region before advancing (default: 5.0)\n"
               << "  --seq-region-mb <mb>     Size of each sequential region in MB (default: 1024)\n"
               << "  --seq-stride <bytes>     Access stride in bytes (default: 4096)\n"
               << "  --seq-delay <sec>        Delay before starting sequential (default: 0)\n"
@@ -373,7 +397,7 @@ int main(int argc, char** argv) {
     size_t seq_region_mb = 1024;
     size_t seq_stride = 4096;
     double seq_delay = 0.0;
-    size_t seq_iters = 1;
+    double seq_phase_duration = 5.0;
     double seq_runtime = 0.0;
     int seq_threads = 1;
 
@@ -405,8 +429,8 @@ int main(int argc, char** argv) {
             seq_delay = std::stod(argv[++i]);
         } else if (arg == "--seq-runtime" && i + 1 < argc) {
             seq_runtime = std::stod(argv[++i]);
-        } else if (arg == "--seq-iters" && i + 1 < argc) {
-            seq_iters = std::stoul(argv[++i]);
+        } else if (arg == "--seq-phase-duration" && i + 1 < argc) {
+            seq_phase_duration = std::stod(argv[++i]);
         } else if (arg == "--seq-threads" && i + 1 < argc) {
             seq_threads = std::stoi(argv[++i]);
         } else if (arg == "--zipf-region-mb" && i + 1 < argc) {
@@ -430,7 +454,7 @@ int main(int argc, char** argv) {
 
     // --- Validate ---
     if (seq_stride == 0) seq_stride = 4096;
-    if (seq_iters < 1) seq_iters = 1;
+    if (seq_phase_duration <= 0) seq_phase_duration = 5.0;
     if (zipf_item_size == 0) zipf_item_size = 4096;
     if (seq_threads < 1) seq_threads = 1;
     if (zipf_threads < 1) zipf_threads = 1;
@@ -440,7 +464,7 @@ int main(int argc, char** argv) {
               << " sample_period=" << sample_period_ms << "ms\n";
     std::cout << "  Sequential: regions=" << seq_regions << " region_mb=" << seq_region_mb
               << " stride=" << seq_stride << " delay=" << seq_delay << "s"
-              << " iters=" << seq_iters
+              << " phase_duration=" << seq_phase_duration << "s"
               << " runtime=" << (seq_runtime > 0 ? std::to_string(seq_runtime) + "s" : "global")
               << " threads=" << seq_threads << "\n";
     if (zipf_region_mb > 0) {
@@ -577,10 +601,13 @@ int main(int argc, char** argv) {
     for (int i = 0; i < seq_threads; i++) seq_done[i].store(false);
     for (int i = 0; i < zipf_threads; i++) zipf_done[i].store(false);
 
+    // --- Set global phase start timestamp (all workers sync to this) ---
+    g_phase_start_time = std::chrono::steady_clock::now();
+
     // --- Launch workers ---
     std::vector<std::thread> threads;
 
-    WorkerConfig seq_config{seq_delay, seq_runtime, seq_iters};
+    WorkerConfig seq_config{seq_delay, seq_runtime, seq_phase_duration};
     for (int t = 0; t < seq_threads; t++) {
         threads.emplace_back(sequential_worker,
                              std::ref(seq_region_vec), seq_stride, seq_config,
