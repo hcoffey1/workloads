@@ -284,7 +284,7 @@ start_pebs() {
     [[ -p "$PEBS_PIPE" ]] && rm "$PEBS_PIPE"
     mkfifo "$PEBS_PIPE"
 
-    sudo "${PEBS_PATH}/bin/pebs_periodic_reads.x" "$sampling_period" "$epoch_size" "$output_file" "$PEBS_PIPE" &
+    sudo -E "${PEBS_PATH}/bin/pebs_periodic_reads.x" "$sampling_period" "$epoch_size" "$output_file" "$PEBS_PIPE" &
     echo $!
 }
 
