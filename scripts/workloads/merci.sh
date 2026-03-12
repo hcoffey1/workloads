@@ -14,10 +14,10 @@ build_merci(){
 
 run_merci(){
     local workload=$1
-    
+
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
-    
+
     # Create wrapper using utility function (with custom HOME environment variable)
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/MERCI/4_performance_evaluation/bin/eval_baseline" "--dataset amazon_All -r \"$num_reps\" -c \"$num_threads\"" "export HOME=\"$CUR_PATH\""
 
@@ -25,6 +25,9 @@ run_merci(){
     run_workload_standard "--cpunodebind=0 -p 0"
 
     start_bwmon
+    start_mpstat
+    start_perf_monitor
+    start_cpufreq
 }
 
 run_strace_merci(){
@@ -32,6 +35,9 @@ run_strace_merci(){
 }
 
 clean_merci(){
-    stop_bwmon
+    stop_bwmon || true
+    stop_mpstat || true
+    stop_perf_monitor || true
+    stop_cpufreq || true
     return
 }

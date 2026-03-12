@@ -152,6 +152,10 @@ sys_cleanup() {
     stop_numastat
     # Re-enable randomized va space
     echo 2 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
+
+    # Drop page cache for clean memory state
+    sync
+    echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
 }
 
 setup_cgroups() {
@@ -293,6 +297,7 @@ stop_pebs() {
     sudo echo "q" > "$PEBS_PIPE" 2>/dev/null || true
     sudo rm -f "$PEBS_PIPE"
 }
+
 
 # ==============================================================================
 # WORKLOAD MANAGEMENT FUNCTIONS

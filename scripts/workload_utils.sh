@@ -22,6 +22,9 @@ generate_workload_filenames() {
     export STDOUT="${base_filename}_stdout.txt"
     export STDERR="${base_filename}_stderr.txt"
     export BWMON="${base_filename}_bwmon.txt"
+    export MPSTAT="${base_filename}_mpstat.txt"
+    export PERFMON="${base_filename}_perfmon.txt"
+    export CPUFREQ="${base_filename}_cpufreq.txt"
     export PIDFILE="${base_filename}.pid"
     export WRAPPER="${OUTPUT_DIR}/run_${suite_name}_${workload_name}_iter${CURRENT_ITERATION:-0}.sh"
 }
@@ -182,6 +185,48 @@ stop_bwmon() {
     # Trying to kill individual pid not working.
     set -x
     sudo killall bwmon
+    set +x
+}
+
+# Depends on sysstat
+start_mpstat() {
+    # Run mpstat for ALL cores at the given interval.
+    # We use >> to append to the file and & to push it to the background.
+    mpstat -P ALL 1 >> "$MPSTAT" 2>/dev/null &
+    sleep 1
+}
+
+stop_mpstat() {
+    # Send a polite SIGTERM signal to stop the background process.
+    # The '|| true' ensures the script doesn't crash if the process already died.
+    set -x
+    sudo killall mpstat
+    set +x
+}
+
+# Depends on perf_monitor binary (built from perf_monitor.cpp via make)
+start_perf_monitor() {
+    local interval_ms="${1:-1000}"
+    sudo "/users/hjcoffey/arms/perf_monitor" "$interval_ms" > "$PERFMON" &
+    sleep 1
+}
+
+stop_perf_monitor() {
+    set -x
+    sudo killall perf_monitor || true
+    set +x
+}
+
+# Depends on cpufreq_monitor binary (built from cpufreq_monitor.cpp via make)
+start_cpufreq() {
+    local interval_ms="${1:-1000}"
+    "/users/hjcoffey/arms/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
+    sleep 1
+}
+
+stop_cpufreq() {
+    set -x
+    killall cpufreq_monitor || true
     set +x
 }
 

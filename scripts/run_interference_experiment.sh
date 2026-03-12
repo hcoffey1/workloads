@@ -21,21 +21,23 @@ set -u
 DURATION=60
 SEQ_REGIONS=64
 SEQ_REGION_MB=64
-SEQ_THREADS=8
+SEQ_THREADS=1
 ZIPF_REGION_MB=4096
 ZIPF_THETA=0.8
-ZIPF_THREADS=8
+ZIPF_THREADS=1
 
 # ARMS configuration
-FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
+FAST_MEM="${FAST_MEM:-40G}"          # Fast tier size
 #SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
 ITERATIONS="${ITERATIONS:-1}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/arms/libarms_kernel.so}"
+#LIB_ARMS_PATH=""
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
 
 
 # Output directory
-OUTPUT_BASE="${OUTPUT_BASE:-results_interference}"
+#OUTPUT_BASE="${OUTPUT_BASE:-results_interference}"
+OUTPUT_BASE="${OUTPUT_BASE:-results_sanity}"
 
 # =============================================================================
 # EXPERIMENT FUNCTIONS
@@ -71,11 +73,18 @@ launch_experiment() {
     export ZIPF_RUNTIME=${ZIPF_RUNTIME:-0}
 
     export REGENT_ANNOTATION_FILE="/users/hjcoffey/workloads/${output_dir}/annotations.txt"
+    #merci
+    export REGENT_TARGET_EXE="bc"
     export REGENT_TARGET_EXE="micro_interference"
-    #export REGENT_TARGET_EXE="bc"
+    export REGENT_TARGET_EXE="eval_baseline"
+    export REGENT_TARGET_EXE="train"
+
+    export BIRCH_OUTPUT="liblinear_birch.bin"
 
     #/users/hjcoffey/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
-    /users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
+    #/users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
+    #/users/hjcoffey/workloads/run.sh -b merci -w merci -o "$output_dir" \
+    /users/hjcoffey/workloads/run.sh -b liblinear -w liblinear -o "$output_dir" \
             -r $ITERATIONS --use-cgroup
 }
 
@@ -164,9 +173,34 @@ mkdir -p "$OUTPUT_BASE"
 # 1. Controls (Global Policy)
 # ---------------------------------------------------------------------------
 echo "Running Control Scenarios..."
-for pol in "ARMS" "lru_ptscan"; do
-    run_control_experiment "control_${pol}" "$pol" "$OUTPUT_BASE/control_${pol}"
-done
+#for pol in "ARMS" "lru_ptscan"; do
+#killall run.sh
+
+#export REGENT_NO_CLUSTERING=1
+#run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
+
+#killall run.sh
+
+unset REGENT_NO_CLUSTERING
+run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_ARMS"
+
+#killall run.sh
+#
+##export REGENT_NO_CLUSTERING=1
+#run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_2_ARMS"
+#
+#killall run.sh
+#
+##unset REGENT_NO_CLUSTERING
+#run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_2_ARMS"
+#
+#killall run.sh
+
+
+#for pol in "ARMS"; do
+#    run_control_experiment "control_${pol}" "$pol" "$OUTPUT_BASE/control_${pol}"
+#done
+exit
 
 # ---------------------------------------------------------------------------
 # 2. Hybrid 2-Region Experiments
