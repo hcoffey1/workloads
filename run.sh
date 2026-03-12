@@ -142,6 +142,10 @@ sys_init() {
     sync
     echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
 
+    # Configure perf events access - allow unprivileged perf event access
+    # perf.paranoid defaults to 2 (restrict to root), set to 0 to allow unprivileged access
+    echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid > /dev/null
+
     if [[ "${USE_CGROUP:-0}" == "1" ]]; then
         setup_cgroups
     fi
