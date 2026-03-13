@@ -21,10 +21,10 @@ set -u
 DURATION=60
 SEQ_REGIONS=64
 SEQ_REGION_MB=64
-SEQ_THREADS=1
+SEQ_THREADS=4
 ZIPF_REGION_MB=4096
 ZIPF_THETA=0.8
-ZIPF_THREADS=1
+ZIPF_THREADS=0
 
 # ARMS configuration
 FAST_MEM="${FAST_MEM:-40G}"          # Fast tier size
@@ -74,18 +74,21 @@ launch_experiment() {
 
     export REGENT_ANNOTATION_FILE="/users/hjcoffey/workloads/${output_dir}/annotations.txt"
     #merci
-    export REGENT_TARGET_EXE="bc"
-    export REGENT_TARGET_EXE="micro_interference"
-    export REGENT_TARGET_EXE="eval_baseline"
     export REGENT_TARGET_EXE="train"
+    export REGENT_TARGET_EXE="eval_baseline"
 
-    export BIRCH_OUTPUT="liblinear_birch.bin"
+    export REGENT_TARGET_EXE="micro_interference"
+    export REGENT_TARGET_EXE="bc"
 
-    #/users/hjcoffey/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
-    #/users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
+    export BIRCH_INPUT="gapbs_bc_birch.bin"
+    export BIRCH_OUTPUT="gapbs_bc_birch.bin"
+    #export LIBLINEAR_USE_GDB=1
+
+    #/users/hjcoffey/workloads/run.sh -b liblinear -w liblinear -o "$output_dir" \
     #/users/hjcoffey/workloads/run.sh -b merci -w merci -o "$output_dir" \
-    /users/hjcoffey/workloads/run.sh -b liblinear -w liblinear -o "$output_dir" \
-            -r $ITERATIONS --use-cgroup
+    #/users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
+    /users/hjcoffey/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
+            -r $ITERATIONS --use-cgroup #-i pebs -s 1000
 }
 
 run_control_experiment() {
