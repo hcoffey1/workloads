@@ -456,8 +456,8 @@ int main(int argc, char** argv) {
     if (seq_stride == 0) seq_stride = 4096;
     if (seq_phase_duration <= 0) seq_phase_duration = 5.0;
     if (zipf_item_size == 0) zipf_item_size = 4096;
-    if (seq_threads < 1) seq_threads = 1;
-    if (zipf_threads < 1) zipf_threads = 1;
+    if (seq_threads < 0) seq_threads = 0;
+    if (zipf_threads < 0) zipf_threads = 0;
 
     // --- Print Configuration ---
     std::cout << "micro_interference: duration=" << duration_sec << "s"
