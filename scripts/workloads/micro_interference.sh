@@ -18,7 +18,7 @@ config_micro_interference() {
     SEQ_STRIDE="${SEQ_STRIDE:-64}"                  # Access stride (bytes)
     SEQ_DELAY="${SEQ_DELAY:-0}"                       # Delay before starting (seconds)
     SEQ_RUNTIME="${SEQ_RUNTIME:-0}"                   # Runtime (0 = global duration)
-    SEQ_PHASE_DURATION="${SEQ_PHASE_DURATION:-3}"             # Seconds per sequential region
+    SEQ_PHASE_DURATION="${SEQ_PHASE_DURATION:-1}"             # Seconds per sequential region
     SEQ_THREADS="${SEQ_THREADS:-8}"                   # Number of threads
 
     # Zipfian pattern settings (16GB)
@@ -89,7 +89,7 @@ run_micro_interference() {
 
     # Always use huge pages
     if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
-    extra_envs+="export USE_HUGETLB=0"
+    extra_envs+="export USE_HUGETLB=1"
 
     generate_workload_filenames "$workload"
 

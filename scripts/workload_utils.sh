@@ -207,7 +207,7 @@ stop_mpstat() {
 # Depends on perf_monitor binary (built from perf_monitor.cpp via make)
 start_perf_monitor() {
     local interval_ms="${1:-1000}"
-    sudo "/users/hjcoffey/arms/perf_monitor" "$interval_ms" > "$PERFMON" &
+    sudo "/users/hjcoffey/working/arms/perf_monitor" "$interval_ms" > "$PERFMON" &
     sleep 1
 }
 
@@ -220,7 +220,7 @@ stop_perf_monitor() {
 # Depends on cpufreq_monitor binary (built from cpufreq_monitor.cpp via make)
 start_cpufreq() {
     local interval_ms="${1:-1000}"
-    "/users/hjcoffey/arms/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
+    "/users/hjcoffey/working/arms/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
     sleep 1
 }
 

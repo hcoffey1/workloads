@@ -27,10 +27,10 @@ ZIPF_THETA=0.8
 ZIPF_THREADS=0
 
 # ARMS configuration
-FAST_MEM="${FAST_MEM:-40G}"          # Fast tier size
+FAST_MEM="${FAST_MEM:-8G}"          # Fast tier size
 #SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
-ITERATIONS="${ITERATIONS:-1}"
-LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/arms/libarms_kernel.so}"
+ITERATIONS="${ITERATIONS:-3}"
+LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
 #LIB_ARMS_PATH=""
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
 
@@ -77,18 +77,19 @@ launch_experiment() {
     export REGENT_TARGET_EXE="train"
     export REGENT_TARGET_EXE="eval_baseline"
 
-    export REGENT_TARGET_EXE="micro_interference"
-    export REGENT_TARGET_EXE="bc"
 
     export BIRCH_INPUT="gapbs_bc_birch.bin"
     export BIRCH_OUTPUT="gapbs_bc_birch.bin"
     #export LIBLINEAR_USE_GDB=1
 
+    export REGENT_TARGET_EXE="micro_interference"
+    export REGENT_TARGET_EXE="bc"
     #/users/hjcoffey/workloads/run.sh -b liblinear -w liblinear -o "$output_dir" \
     #/users/hjcoffey/workloads/run.sh -b merci -w merci -o "$output_dir" \
     #/users/hjcoffey/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
-    /users/hjcoffey/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
-            -r $ITERATIONS --use-cgroup #-i pebs -s 1000
+    /users/hjcoffey/working/workloads/run.sh -b gapbs -w bc -o "$output_dir" \
+            -r $ITERATIONS
+                #--use-cgroup #-i pebs -s 1000
 }
 
 run_control_experiment() {
@@ -179,8 +180,8 @@ echo "Running Control Scenarios..."
 #for pol in "ARMS" "lru_ptscan"; do
 #killall run.sh
 
-#export REGENT_NO_CLUSTERING=1
-#run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
+export REGENT_NO_CLUSTERING=1
+run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
 
 #killall run.sh
 

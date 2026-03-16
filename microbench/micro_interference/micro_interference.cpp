@@ -23,6 +23,16 @@
 std::chrono::steady_clock::time_point g_start_time;
 std::chrono::steady_clock::time_point g_phase_start_time;
 
+// Batch clock checks to reduce timer overhead (~20-50ns per Clock::now() call).
+// With stride=64 and region_mb=64, the inner loop does ~1M accesses; checking
+// every 4096 iterations reduces timer calls from ~1M to ~256 per pass.
+static constexpr size_t CLOCK_CHECK_INTERVAL = 4096;
+
+// Cache-line-padded atomics to prevent false sharing between seq_ops, zipf_ops,
+// and global_stop which are otherwise stack-allocated adjacently.
+struct alignas(64) PaddedAtomicBool { std::atomic<bool> val{false}; };
+struct alignas(64) PaddedAtomicU64  { std::atomic<uint64_t> val{0}; };
+
 // Function to update Regent's view of a Region
 void update_regent_region(int region_id, uint64_t start, uint64_t end) {
     char dir_path[256];
@@ -146,10 +156,10 @@ static void* mmap_aligned_2mb(size_t length) {
     }
     uintptr_t addr = reinterpret_cast<uintptr_t>(base);
     uintptr_t aligned = (addr + (HUGEPAGE_SIZE - 1)) & ~(HUGEPAGE_SIZE - 1);
-    // size_t head = static_cast<size_t>(aligned - addr);
-    // if (head) munmap(reinterpret_cast<void*>(addr), head);
-    // size_t tail = (addr + request) - (aligned + length);
-    // if (tail) munmap(reinterpret_cast<void*>(aligned + length), tail);
+    size_t head = static_cast<size_t>(aligned - addr);
+    if (head) munmap(reinterpret_cast<void*>(addr), head);
+    size_t tail = (addr + request) - (aligned + length);
+    if (tail) munmap(reinterpret_cast<void*>(aligned + length), tail);
     return reinterpret_cast<void*>(aligned);
 }
 
@@ -161,11 +171,12 @@ static void* alloc_region(size_t bytes) {
         flags |= MAP_HUGE_2MB;
 #endif
         void* p = mmap(nullptr, aligned_bytes, PROT_READ | PROT_WRITE, flags, -1, 0);
-        if (p == MAP_FAILED) {
-            perror("mmap MAP_HUGETLB");
-            return nullptr;
+        if (p != MAP_FAILED) {
+            return p;
         }
-        return p;
+        // MAP_HUGETLB failed; fall back to MADV_HUGEPAGE
+        std::cerr << "mmap MAP_HUGETLB failed (" << strerror(errno)
+                  << "), falling back to MADV_HUGEPAGE\n";
     }
     void* p = mmap_aligned_2mb(aligned_bytes);
     if (p == MAP_FAILED) {
@@ -208,13 +219,13 @@ static void sequential_worker(
     const WorkerConfig& config,
     std::atomic<bool>& global_stop,
     std::atomic<uint64_t>& op_counter,
-    std::atomic<bool>& worker_done
+    std::atomic<bool>& worker_done,
+    int thread_id
 ) {
     using Clock = std::chrono::steady_clock;
 
-    // Initialize RNG
-    std::random_device rd;
-    std::mt19937 rng(rd());
+    // Deterministic RNG seeding for reproducible access patterns across runs
+    std::mt19937 rng(42 + thread_id);
 
     // Handle delay
     if (config.delay_sec > 0) {
@@ -269,24 +280,37 @@ static void sequential_worker(
 
         if (num_accesses > 0) {
             std::uniform_int_distribution<size_t> dist(0, num_accesses - 1);
+            uint64_t local_ops = 0;
             for (size_t i = 0; i < num_accesses; i++) {
-                if (global_stop.load(std::memory_order_relaxed)) break;
+                if ((i & (CLOCK_CHECK_INTERVAL - 1)) == 0) {
+                    if (global_stop.load(std::memory_order_relaxed)) break;
 
-                // Re-check phase transition periodically within inner loop
-                auto inner_now = Clock::now();
-                double inner_elapsed = std::chrono::duration<double>(inner_now - g_phase_start_time).count();
-                if (inner_elapsed > phase_dur * (phase_iteration + 1)) {
-                    phase_iteration++;
-                    region_idx = phase_iteration % num_regions;
-                    break; // Break out to restart with the new region
+                    // Re-check phase transition periodically within inner loop
+                    auto inner_now = Clock::now();
+                    double inner_elapsed = std::chrono::duration<double>(inner_now - g_phase_start_time).count();
+                    if (inner_elapsed > phase_dur * (phase_iteration + 1)) {
+                        phase_iteration++;
+                        region_idx = phase_iteration % num_regions;
+                        break; // Break out to restart with the new region
+                    }
+
+                    // Flush local ops to shared counter
+                    if (local_ops > 0) {
+                        op_counter.fetch_add(local_ops, std::memory_order_relaxed);
+                        local_ops = 0;
+                    }
                 }
 
                 size_t idx = dist(rng);
                 size_t offset = idx * stride;
                 if (offset < region.bytes) {
                     p[offset]++;
-                    op_counter.fetch_add(1, std::memory_order_relaxed);
+                    local_ops++;
                 }
+            }
+            // Flush remaining local ops
+            if (local_ops > 0) {
+                op_counter.fetch_add(local_ops, std::memory_order_relaxed);
             }
         }
     }
@@ -332,12 +356,25 @@ static void zipfian_worker(
     auto start_time = Clock::now();
     auto runtime_ms = static_cast<int64_t>(config.runtime_sec * 1000);
 
-    while (!global_stop.load(std::memory_order_relaxed)) {
-        // Check runtime limit
-        if (config.runtime_sec > 0) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time).count();
-            if (elapsed >= runtime_ms) {
-                break;
+    uint64_t local_ops = 0;
+    size_t iter_count = 0;
+
+    while (true) {
+        if ((iter_count & (CLOCK_CHECK_INTERVAL - 1)) == 0) {
+            if (global_stop.load(std::memory_order_relaxed)) break;
+
+            // Check runtime limit
+            if (config.runtime_sec > 0) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time).count();
+                if (elapsed >= runtime_ms) {
+                    break;
+                }
+            }
+
+            // Flush local ops to shared counter
+            if (local_ops > 0) {
+                op_counter.fetch_add(local_ops, std::memory_order_relaxed);
+                local_ops = 0;
             }
         }
 
@@ -346,8 +383,14 @@ static void zipfian_worker(
         if (offset < region.bytes) {
             volatile char* p = region.buf + offset;
             *p = (*p) + 1;
-            op_counter.fetch_add(1, std::memory_order_relaxed);
+            local_ops++;
         }
+        iter_count++;
+    }
+
+    // Flush remaining local ops
+    if (local_ops > 0) {
+        op_counter.fetch_add(local_ops, std::memory_order_relaxed);
     }
 
     worker_done.store(true, std::memory_order_relaxed);
@@ -591,15 +634,13 @@ int main(int argc, char** argv) {
     }
     std::cout << "=====================================\n\n";
 
-    // --- Setup atomics ---
-    std::atomic<bool> global_stop{false};
-    std::atomic<uint64_t> seq_ops{0};
-    std::atomic<uint64_t> zipf_ops{0};
+    // --- Setup atomics (cache-line-padded to prevent false sharing) ---
+    PaddedAtomicBool global_stop;
+    PaddedAtomicU64 seq_ops;
+    PaddedAtomicU64 zipf_ops;
 
-    std::vector<std::atomic<bool>> seq_done(seq_threads);
-    std::vector<std::atomic<bool>> zipf_done(zipf_threads);
-    for (int i = 0; i < seq_threads; i++) seq_done[i].store(false);
-    for (int i = 0; i < zipf_threads; i++) zipf_done[i].store(false);
+    std::vector<PaddedAtomicBool> seq_done(seq_threads);
+    std::vector<PaddedAtomicBool> zipf_done(zipf_threads);
 
     // --- Set global phase start timestamp (all workers sync to this) ---
     g_phase_start_time = std::chrono::steady_clock::now();
@@ -611,7 +652,7 @@ int main(int argc, char** argv) {
     for (int t = 0; t < seq_threads; t++) {
         threads.emplace_back(sequential_worker,
                              std::ref(seq_region_vec), seq_stride, seq_config,
-                             std::ref(global_stop), std::ref(seq_ops), std::ref(seq_done[t]));
+                             std::ref(global_stop.val), std::ref(seq_ops.val), std::ref(seq_done[t].val), t);
     }
 
     if (zipf_region_mb > 0) {
@@ -619,7 +660,7 @@ int main(int argc, char** argv) {
         for (int t = 0; t < zipf_threads; t++) {
             threads.emplace_back(zipfian_worker,
                                  std::ref(zipf_region), zipf_item_size, zipf_theta, zipf_config,
-                                 std::ref(global_stop), std::ref(zipf_ops), std::ref(zipf_done[t]), t);
+                                 std::ref(global_stop.val), std::ref(zipf_ops.val), std::ref(zipf_done[t].val), t);
         }
     }
 
@@ -639,8 +680,8 @@ int main(int argc, char** argv) {
         double elapsed = std::chrono::duration<double>(now - benchmark_start).count();
 
         // Read counters
-        uint64_t cur_seq_ops = seq_ops.load(std::memory_order_relaxed);
-        uint64_t cur_zipf_ops = zipf_ops.load(std::memory_order_relaxed);
+        uint64_t cur_seq_ops = seq_ops.val.load(std::memory_order_relaxed);
+        uint64_t cur_zipf_ops = zipf_ops.val.load(std::memory_order_relaxed);
 
         // Calculate throughput
         double dt = elapsed - last_sample_time;
@@ -658,20 +699,20 @@ int main(int argc, char** argv) {
 
         // Check termination
         if (elapsed >= duration_sec) {
-            global_stop.store(true, std::memory_order_relaxed);
+            global_stop.val.store(true, std::memory_order_relaxed);
             break;
         }
 
         // Check if all workers with finite runtime are done
         bool all_done = true;
         for (int i = 0; i < seq_threads; i++) {
-            if (!seq_done[i].load(std::memory_order_relaxed)) all_done = false;
+            if (!seq_done[i].val.load(std::memory_order_relaxed)) all_done = false;
         }
         for (int i = 0; i < zipf_threads; i++) {
-            if (!zipf_done[i].load(std::memory_order_relaxed)) all_done = false;
+            if (!zipf_done[i].val.load(std::memory_order_relaxed)) all_done = false;
         }
         if (all_done) {
-            global_stop.store(true, std::memory_order_relaxed);
+            global_stop.val.store(true, std::memory_order_relaxed);
             break;
         }
     }
@@ -685,8 +726,8 @@ int main(int argc, char** argv) {
     annotate_event("All workers joined");
 
     // --- Final stats ---
-    uint64_t final_seq = seq_ops.load();
-    uint64_t final_zipf = zipf_ops.load();
+    uint64_t final_seq = seq_ops.val.load();
+    uint64_t final_zipf = zipf_ops.val.load();
     auto end = std::chrono::steady_clock::now();
     double total_time = std::chrono::duration<double>(end - benchmark_start).count();
 
