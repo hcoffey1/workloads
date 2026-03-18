@@ -18,15 +18,15 @@ build_gapbs(){
 
 run_gapbs(){
     local workload=$1
-    
+
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
-    
+
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/gapbs/$workload" "-n \"$num_rep\" -g \"$graph_size\"" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 
     start_bwmon
 }
