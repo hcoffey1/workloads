@@ -5,7 +5,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_cloverleaf(){
     WORK_DIR=$CUR_PATH/CloverLeaf/CloverLeaf_OpenMP/
-    num_threads=16
+    num_threads=8
     cp $WORK_DIR/InputDecks/clover_bm16_short.in ./clover.in
 }
 
@@ -19,15 +19,15 @@ build_cloverleaf(){
 
 run_cloverleaf(){
     local workload=$1
-    
+
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
-    
+
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$WORK_DIR/clover_leaf" "" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 
     # BW Monitoring
     #sudo $CUR_PATH/scripts/cipp-workspace/tools/bwmon 500 \

@@ -39,6 +39,7 @@ results_*
 gups_hemem/gups-skewed
 gups_hemem/gups-hotset-move
 gups_hemem/gups-random
+microbench/micro_interference/micro_interference
 
 # Reult dir
 results
@@ -56,6 +57,8 @@ times.txt
 *.backup
 *.xl
 *.par
+*.bin
+*.csv
 
 # Jupyter Notebook
 .ipynb_checkpoints

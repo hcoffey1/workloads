@@ -15,15 +15,15 @@ build_liblinear(){
 
 run_liblinear(){
     local workload=$1
-    
+
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
-    
+
     # Create wrapper using utility function
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/liblinear-2.47/train" "-s 6 -m \"$num_threads\" \"$dataset\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 
     # BW monitoring
     start_bwmon

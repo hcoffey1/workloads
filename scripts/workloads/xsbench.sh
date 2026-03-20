@@ -13,20 +13,20 @@ build_xsbench(){
 }
 
 run_xsbench(){
-    local workload="xsbench"
-    
+    local workload=$1
+
     # Use utility functions to set up and run workload
     generate_workload_filenames "$workload"
-    
+
     # Set OpenMP threads in the wrapper creation
     local binary_path="$CUR_PATH/XSBench/openmp-threading/XSBench"
     local binary_args="-t $num_threads -p $particles -g $gridpoints"
-    
+
     # Create wrapper with OMP_NUM_THREADS environment variable
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "$binary_args" "export OMP_NUM_THREADS=\"$num_threads\""
-    
+
     # Run with standard execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
     start_bwmon
 }
 

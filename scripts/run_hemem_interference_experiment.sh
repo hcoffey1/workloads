@@ -57,7 +57,7 @@ SEQ_THREADS="${SEQ_THREADS:-4}"
 ZIPF_REGION_MB="${ZIPF_REGION_MB:-4096}"
 ZIPF_THETA="${ZIPF_THETA:-0.8}"
 ZIPF_THREADS="${ZIPF_THREADS:-4}"
-ITERATIONS="${ITERATIONS:-2}"
+ITERATIONS="${ITERATIONS:-5}"
 FAST_MEM="${FAST_MEM:-2G}"
 
 LIB_ARMS_STATIC_PATH="${LIB_ARMS_STATIC_PATH:-$HOME/working/arms/libarms_static.so}"
@@ -211,8 +211,8 @@ for cfg in "${SELECTED[@]}"; do
             echo "Generating tuned split config (sequential: reactive, zipfian: default)..."
             generate_hemem_split_config "$config_file" \
                 "256M" "1.75G" \
-                4 2 5 5000 \
-                8 4 10 10000
+                1 100 2 1000 \
+                4 6 9 55775
             ;;
         hemem_split_default)
             echo "Generating default split config (both regions: default thresholds)..."
