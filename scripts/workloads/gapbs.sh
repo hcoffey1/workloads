@@ -5,9 +5,9 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_gapbs(){
     num_threads=8
-    num_rep=5
-    num_iter=5
+    num_rep=20
     graph_size=27
+    #graph_size=27
     graph_path=$CUR_PATH/gapbs/benchmark/graphs/twitterU.sg
     w_graph_path=$CUR_PATH/gapbs/benchmark/graphs/twitter.wsg
 }

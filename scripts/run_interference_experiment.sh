@@ -27,9 +27,9 @@ ZIPF_THETA=0.8
 ZIPF_THREADS=4
 
 # ARMS configuration
-FAST_MEM="${FAST_MEM:-32G}"          # Fast tier size
+FAST_MEM="${FAST_MEM:-4.5G}"          # Fast tier size
 #SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
-ITERATIONS="${ITERATIONS:-1}"
+ITERATIONS="${ITERATIONS:-3}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
 #LIB_ARMS_PATH=""
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
@@ -55,7 +55,7 @@ launch_experiment() {
     mkdir -p "$output_dir"
 
     # Export common configuration
-    export REGENT_VIS_DIR="/users/hjcoffey/workloads/$output_dir/vis"
+    export REGENT_VIS_DIR="/users/hjcoffey/working/workloads/$output_dir/vis"
     export REGENT_VISUALIZATION=1
     export INTERFERENCE_DURATION=$DURATION
     export SEQ_REGIONS=$SEQ_REGIONS
@@ -183,15 +183,18 @@ mkdir -p "$OUTPUT_BASE"
 # ---------------------------------------------------------------------------
 echo "Running Control Scenarios..."
 #for pol in "ARMS" "lru_ptscan"; do
-#killall run.sh
+killall run.sh
+
+export REGENT_NO_CLUSTERING=1
+run_control_experiment "control_4.5" "ARMS" "$OUTPUT_BASE/control_ARMS_4_5"
 
 #export REGENT_NO_CLUSTERING=1
 #run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
 
 #killall run.sh
 
-unset REGENT_NO_CLUSTERING
-run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_ARMS"
+#unset REGENT_NO_CLUSTERING
+#run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_ARMS"
 
 #killall run.sh
 #

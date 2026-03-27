@@ -17,7 +17,8 @@ FAST_MEM="${FAST_MEM:-32G}"
 ITERATIONS="${ITERATIONS:-1}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"
-OUTPUT_BASE="${OUTPUT_BASE:-results_clustering}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+OUTPUT_BASE="${OUTPUT_BASE:-results_clustering_${TIMESTAMP}}"
 
 BIRCH_MODEL_DIR="${OUTPUT_BASE}/birch_models"
 
