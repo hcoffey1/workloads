@@ -27,7 +27,7 @@ ZIPF_THETA=0.8
 ZIPF_THREADS=4
 
 # ARMS configuration
-FAST_MEM="${FAST_MEM:-4.5G}"          # Fast tier size
+FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
 #SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
 ITERATIONS="${ITERATIONS:-3}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
@@ -183,10 +183,26 @@ mkdir -p "$OUTPUT_BASE"
 # ---------------------------------------------------------------------------
 echo "Running Control Scenarios..."
 #for pol in "ARMS" "lru_ptscan"; do
+#killall run.sh
+#
+#export REGENT_NO_CLUSTERING=1
+#run_control_experiment "control_4.0" "ARMS" "$OUTPUT_BASE/control_ARMS_4_0"
+
 killall run.sh
 
+FAST_MEM="3.5G"          # Fast tier size
+
 export REGENT_NO_CLUSTERING=1
-run_control_experiment "control_4.5" "ARMS" "$OUTPUT_BASE/control_ARMS_4_5"
+run_control_experiment "control_3.5" "ARMS" "$OUTPUT_BASE/control_ARMS_3_5"
+
+killall run.sh
+
+FAST_MEM="3G"          # Fast tier size
+
+export REGENT_NO_CLUSTERING=1
+run_control_experiment "control_3.0" "ARMS" "$OUTPUT_BASE/control_ARMS_3_0"
+
+killall run.sh
 
 #export REGENT_NO_CLUSTERING=1
 #run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
