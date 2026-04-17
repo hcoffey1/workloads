@@ -2,9 +2,17 @@
 # =============================================================================
 # REGENT Clustering (BIRCH) Experiment Harness
 # =============================================================================
-# Runs BIRCH clustering across multiple workloads. For each workload:
-#   1. Build run: builds a BIRCH model from scratch
-#   2. RO run: uses the built BIRCH model in read-only mode
+# Runs BIRCH clustering across multiple workloads under two clustering
+# configurations:
+#   - hot:      ENABLE_COLDNESS_DURATION=0 (1D centroids)
+#   - hot_cold: ENABLE_COLDNESS_DURATION=1 (2D centroids)
+#
+# For each phase, arms is rebuilt with the appropriate compile-time flag and
+# the resulting libarms_kernel.so is copied to a phase-tagged path so the
+# second build can't clobber the first.
+#
+# For each workload in each phase, a BUILD-only run is performed (RO step is
+# intentionally left commented out below).
 # =============================================================================
 
 set -u
@@ -15,12 +23,11 @@ set -u
 
 FAST_MEM="${FAST_MEM:-32G}"
 ITERATIONS="${ITERATIONS:-1}"
-LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
+ARMS_DIR="${ARMS_DIR:-$HOME/working/arms}"
+ARMS_LIB="libarms_kernel.so"
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_BASE="${OUTPUT_BASE:-results_clustering_${TIMESTAMP}}"
-
-BIRCH_MODEL_DIR="${OUTPUT_BASE}/birch_models"
 
 # =============================================================================
 # WORKLOAD REGISTRY
@@ -48,7 +55,6 @@ WORKLOADS=(
 # COMMON ENVIRONMENT
 # =============================================================================
 
-export HEMEMPOL="$LIB_ARMS_PATH"
 export REGENT_FAST_MEMORY="$FAST_MEM"
 export ARMS_POLICY="$ARMS_POLICY"
 export REGENT_VISUALIZATION=1
@@ -59,6 +65,26 @@ RUN_SH="${SCRIPT_DIR}/../run.sh"
 # =============================================================================
 # FUNCTIONS
 # =============================================================================
+
+build_arms() {
+    local coldness_flag="$1"
+    local dest_path="$2"
+
+    echo "=========================================="
+    echo "BUILD ARMS: ENABLE_COLDNESS_DURATION=${coldness_flag}"
+    echo "  Dest:  ${dest_path}"
+    echo "=========================================="
+
+    (cd "$ARMS_DIR" && make clean && make -j ENABLE_COLDNESS_DURATION="$coldness_flag")
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        echo "ERROR: arms build failed (ENABLE_COLDNESS_DURATION=${coldness_flag})" >&2
+        exit $rc
+    fi
+
+    cp "${ARMS_DIR}/${ARMS_LIB}" "$dest_path"
+    echo "  Copied $(basename "$dest_path")"
+}
 
 run_build_birch() {
     local suite="$1"
@@ -106,36 +132,86 @@ run_ro_birch() {
         -r "$ITERATIONS" --use-cgroup
 }
 
+run_phase() {
+    local label="$1"
+    local coldness_flag="$2"
+
+    local lib_tagged="${OUTPUT_BASE}/libarms_kernel_${label}.so"
+    build_arms "$coldness_flag" "$lib_tagged"
+
+    export LIB_ARMS_PATH="$lib_tagged"
+    export HEMEMPOL="$lib_tagged"
+
+    local phase_base="${OUTPUT_BASE}/${label}"
+    local birch_model_dir="${phase_base}/birch_models"
+    mkdir -p "$phase_base" "$birch_model_dir"
+
+    echo "=============================================="
+    echo "Phase: ${label} (ENABLE_COLDNESS_DURATION=${coldness_flag})"
+    echo "  Library:      ${lib_tagged}"
+    echo "  Output base:  ${phase_base}"
+    echo "  BIRCH models: ${birch_model_dir}"
+    echo "=============================================="
+
+    for entry in "${WORKLOADS[@]}"; do
+        IFS=':' read -r suite workload target_exe <<< "$entry"
+
+        local birch_model="${birch_model_dir}/${suite}_${workload}_birch.bin"
+        local build_dir="${phase_base}/${suite}_${workload}_build"
+        local ro_dir="${phase_base}/${suite}_${workload}_ro"
+
+        # Step 1: Build BIRCH model
+        run_build_birch "$suite" "$workload" "$target_exe" "$build_dir" "$birch_model"
+
+        # Step 2: Read-only run using built model
+        # run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
+    done
+}
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
 mkdir -p "$OUTPUT_BASE"
-mkdir -p "$BIRCH_MODEL_DIR"
 
 echo "=============================================="
 echo "REGENT Clustering Experiment"
 echo "  Output base:  ${OUTPUT_BASE}"
-echo "  BIRCH models: ${BIRCH_MODEL_DIR}"
 echo "  Iterations:   ${ITERATIONS}"
 echo "  Workloads:    ${#WORKLOADS[@]}"
 echo "=============================================="
 
-for entry in "${WORKLOADS[@]}"; do
-    IFS=':' read -r suite workload target_exe <<< "$entry"
+run_phase "hot"      0
+run_phase "hot_cold" 1
 
-    birch_model="${BIRCH_MODEL_DIR}/${suite}_${workload}_birch.bin"
-    build_dir="${OUTPUT_BASE}/${suite}_${workload}_build"
-    ro_dir="${OUTPUT_BASE}/${suite}_${workload}_ro"
+# =============================================================================
+# CROSS-WORKLOAD PLOTTING
+# =============================================================================
 
-    # Step 1: Build BIRCH model
-    run_build_birch "$suite" "$workload" "$target_exe" "$build_dir" "$birch_model"
-
-    # Step 2: Read-only run using built model
-    run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
-done
+CROSS_PLOT_SCRIPT="${ARMS_DIR}/scripts/plot_centroids_cross.py"
+if command -v conda >/dev/null 2>&1; then
+    echo "=============================================="
+    echo "Generating cross-workload centroid plots ..."
+    echo "=============================================="
+    # shellcheck disable=SC1091
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate dataVis
+    python3 "$CROSS_PLOT_SCRIPT" "$OUTPUT_BASE"
+    conda deactivate
+else
+    echo "WARNING: conda not on PATH; skipping cross-workload plotting."
+    echo "         To plot manually:"
+    echo "           conda activate dataVis"
+    echo "           python3 ${CROSS_PLOT_SCRIPT} ${OUTPUT_BASE}"
+fi
 
 echo "=============================================="
 echo "All clustering experiments completed!"
-echo "Results in: ${OUTPUT_BASE}"
+echo "  Hot phase results:      ${OUTPUT_BASE}/hot"
+echo "  Hot+Cold phase results: ${OUTPUT_BASE}/hot_cold"
+echo "  Cross-workload outputs:"
+echo "    ${OUTPUT_BASE}/hot/centroids_cross_workload.png"
+echo "    ${OUTPUT_BASE}/hot/centroids_cross_workload.csv"
+echo "    ${OUTPUT_BASE}/hot_cold/centroids_cross_workload.png"
+echo "    ${OUTPUT_BASE}/hot_cold/centroids_cross_workload.csv"
 echo "=============================================="
