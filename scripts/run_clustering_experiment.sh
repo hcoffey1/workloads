@@ -41,19 +41,20 @@ SHUFFLE_SEED="${SHUFFLE_SEED:-$(date +%s)}"
 # Comment out entries to skip workloads.
 
 WORKLOADS=(
-    "gapbs:bc:bc"
-    "gapbs:bfs:bfs"
-    "gapbs:pr:pr"
-    "gapbs:pr_spmv:pr_spmv"
-    "gapbs:cc:cc"
-    "gapbs:cc_sv:cc_sv"
-    "gapbs:sssp:sssp"
-    "gapbs:tc:tc"
-    "liblinear:liblinear:train"
-    "merci:merci:eval_baseline"
-    "xsbench:xsbench:XSBench"
-    "cloverleaf:cloverleaf:clover_leaf"
-    "silo:silo:dbtest"
+    "micro_interference:micro_interference:micro_interference"
+    #"gapbs:bc:bc"
+    #"gapbs:bfs:bfs"
+    #"gapbs:pr:pr"
+    #"gapbs:pr_spmv:pr_spmv"
+    #"gapbs:cc:cc"
+    #"gapbs:cc_sv:cc_sv"
+    #"gapbs:sssp:sssp"
+    #"gapbs:tc:tc"
+    #"liblinear:liblinear:train"
+    #"merci:merci:eval_baseline"
+    #"xsbench:xsbench:XSBench"
+    #"cloverleaf:cloverleaf:clover_leaf"
+    #"silo:silo:dbtest"
 )
 
 # =============================================================================
@@ -253,7 +254,7 @@ run_phase() {
         run_build_birch "$suite" "$workload" "$target_exe" "$build_dir" "$birch_model"
 
         # Step 2: Read-only run using built model
-        # run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
+        run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
     done
 }
 

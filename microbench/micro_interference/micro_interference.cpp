@@ -207,6 +207,9 @@ struct WorkerConfig {
     double delay_sec;      // Delay before starting (seconds)
     double runtime_sec;    // How long to run (0 = until global stop)
     double phase_duration; // Seconds to spend on each sequential region before moving to next
+    double time_offset;    // Per-thread stagger: thread_id * time_offset is added to delay
+                           // and subtracted from phase elapsed, producing an echo of the
+                           // sequential pattern shifted by this amount per thread.
 };
 
 // =============================================================================
@@ -227,9 +230,14 @@ static void sequential_worker(
     // Deterministic RNG seeding for reproducible access patterns across runs
     std::mt19937 rng(42 + thread_id);
 
-    // Handle delay
-    if (config.delay_sec > 0) {
-        auto delay_ms = static_cast<int>(config.delay_sec * 1000);
+    // Per-thread stagger: thread t starts t*time_offset seconds after thread 0
+    // and uses an effective phase reference shifted forward by the same amount.
+    double thread_offset = static_cast<double>(thread_id) * config.time_offset;
+
+    // Handle delay (includes per-thread stagger offset)
+    double effective_delay = config.delay_sec + thread_offset;
+    if (effective_delay > 0) {
+        auto delay_ms = static_cast<int64_t>(effective_delay * 1000);
         auto delay_end = Clock::now() + std::chrono::milliseconds(delay_ms);
         while (Clock::now() < delay_end && !global_stop.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -264,9 +272,11 @@ static void sequential_worker(
             }
         }
 
-        // Check if we need to advance to the next region based on elapsed time
+        // Check if we need to advance to the next region based on elapsed time.
+        // Subtracting thread_offset shifts this thread's phase reference forward,
+        // so each thread sees its own echo of the sequential pattern.
         auto now = Clock::now();
-        double elapsed_since_phase_start = std::chrono::duration<double>(now - g_phase_start_time).count();
+        double elapsed_since_phase_start = std::chrono::duration<double>(now - g_phase_start_time).count() - thread_offset;
         if (elapsed_since_phase_start > phase_dur * (phase_iteration + 1)) {
             phase_iteration++;
             region_idx = phase_iteration % num_regions;
@@ -287,7 +297,7 @@ static void sequential_worker(
 
                     // Re-check phase transition periodically within inner loop
                     auto inner_now = Clock::now();
-                    double inner_elapsed = std::chrono::duration<double>(inner_now - g_phase_start_time).count();
+                    double inner_elapsed = std::chrono::duration<double>(inner_now - g_phase_start_time).count() - thread_offset;
                     if (inner_elapsed > phase_dur * (phase_iteration + 1)) {
                         phase_iteration++;
                         region_idx = phase_iteration % num_regions;
@@ -413,6 +423,11 @@ static void print_usage(const char* prog) {
               << "  --seq-delay <sec>        Delay before starting sequential (default: 0)\n"
               << "  --seq-runtime <sec>      Runtime for sequential (0 = global duration)\n"
               << "  --seq-threads <n>        Number of sequential threads (default: 1)\n"
+              << "  --seq-time-offset <sec>  Per-thread stagger between sequential workers;\n"
+              << "                           thread t starts t*offset seconds after thread 0\n"
+              << "                           and its phase reference is shifted by the same\n"
+              << "                           amount, producing an echo of the sequential pattern\n"
+              << "                           (default: 0)\n"
               << "\nZipfian Pattern Options:\n"
               << "  --zipf-region-mb <mb>    Size of zipfian region in MB (0 = disabled, default: 0)\n"
               << "  --zipf-item-size <bytes> Item size for zipfian (default: 4096)\n"
@@ -443,6 +458,7 @@ int main(int argc, char** argv) {
     double seq_phase_duration = 5.0;
     double seq_runtime = 0.0;
     int seq_threads = 1;
+    double seq_time_offset = 0.0;
 
     // Zipfian defaults
     size_t zipf_region_mb = 0; // 0 = disabled
@@ -476,6 +492,8 @@ int main(int argc, char** argv) {
             seq_phase_duration = std::stod(argv[++i]);
         } else if (arg == "--seq-threads" && i + 1 < argc) {
             seq_threads = std::stoi(argv[++i]);
+        } else if (arg == "--seq-time-offset" && i + 1 < argc) {
+            seq_time_offset = std::stod(argv[++i]);
         } else if (arg == "--zipf-region-mb" && i + 1 < argc) {
             zipf_region_mb = std::stoul(argv[++i]);
         } else if (arg == "--zipf-item-size" && i + 1 < argc) {
@@ -501,6 +519,7 @@ int main(int argc, char** argv) {
     if (zipf_item_size == 0) zipf_item_size = 4096;
     if (seq_threads < 0) seq_threads = 0;
     if (zipf_threads < 0) zipf_threads = 0;
+    if (seq_time_offset < 0) seq_time_offset = 0.0;
 
     // --- Print Configuration ---
     std::cout << "micro_interference: duration=" << duration_sec << "s"
@@ -509,7 +528,8 @@ int main(int argc, char** argv) {
               << " stride=" << seq_stride << " delay=" << seq_delay << "s"
               << " phase_duration=" << seq_phase_duration << "s"
               << " runtime=" << (seq_runtime > 0 ? std::to_string(seq_runtime) + "s" : "global")
-              << " threads=" << seq_threads << "\n";
+              << " threads=" << seq_threads
+              << " time_offset=" << seq_time_offset << "s\n";
     if (zipf_region_mb > 0) {
         std::cout << "  Zipfian: region_mb=" << zipf_region_mb << " item_size=" << zipf_item_size
                   << " theta=" << zipf_theta << " delay=" << zipf_delay << "s"
@@ -648,7 +668,7 @@ int main(int argc, char** argv) {
     // --- Launch workers ---
     std::vector<std::thread> threads;
 
-    WorkerConfig seq_config{seq_delay, seq_runtime, seq_phase_duration};
+    WorkerConfig seq_config{seq_delay, seq_runtime, seq_phase_duration, seq_time_offset};
     for (int t = 0; t < seq_threads; t++) {
         threads.emplace_back(sequential_worker,
                              std::ref(seq_region_vec), seq_stride, seq_config,
@@ -656,7 +676,7 @@ int main(int argc, char** argv) {
     }
 
     if (zipf_region_mb > 0) {
-        WorkerConfig zipf_config{zipf_delay, zipf_runtime, 0};
+        WorkerConfig zipf_config{zipf_delay, zipf_runtime, 0, 0};
         for (int t = 0; t < zipf_threads; t++) {
             threads.emplace_back(zipfian_worker,
                                  std::ref(zipf_region), zipf_item_size, zipf_theta, zipf_config,

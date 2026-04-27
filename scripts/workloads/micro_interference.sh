@@ -20,6 +20,7 @@ config_micro_interference() {
     SEQ_RUNTIME="${SEQ_RUNTIME:-0}"                   # Runtime (0 = global duration)
     SEQ_PHASE_DURATION="${SEQ_PHASE_DURATION:-1}"             # Seconds per sequential region
     SEQ_THREADS="${SEQ_THREADS:-8}"                   # Number of threads
+    SEQ_TIME_OFFSET=${SEQ_TIME_OFFSET:-10}
 
     # Zipfian pattern settings (16GB)
     ZIPF_REGION_MB="${ZIPF_REGION_MB:-4096}"         # Zipfian region size = 16GB
@@ -105,6 +106,7 @@ run_micro_interference() {
     args="$args --seq-runtime $SEQ_RUNTIME"
     args="$args --seq-phase-duration $SEQ_PHASE_DURATION"
     args="$args --seq-threads $SEQ_THREADS"
+    args="$args --seq-time-offset $SEQ_TIME_OFFSET"
 
     # Zipfian args
     args="$args --zipf-region-mb $ZIPF_REGION_MB"
