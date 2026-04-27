@@ -27,6 +27,11 @@ generate_workload_filenames() {
     export CPUFREQ="${base_filename}_cpufreq.txt"
     export PIDFILE="${base_filename}.pid"
     export WRAPPER="${OUTPUT_DIR}/run_${suite_name}_${workload_name}_iter${CURRENT_ITERATION:-0}.sh"
+    # Prefix used by the arms metric_log writer to split parser-consumed tags
+    # into per-tag sibling files (profiledump.txt / bwdump.txt /
+    # phasechange.txt / birch.txt). plot_profiles.py discovers them by
+    # stripping `_stderr.txt` from its argument.
+    export REGENT_LOG_PREFIX="${base_filename}_"
 }
 
 # Create a standard wrapper script for workloads

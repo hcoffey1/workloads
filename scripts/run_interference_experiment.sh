@@ -29,7 +29,7 @@ ZIPF_THREADS=4
 # ARMS configuration
 FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
 #SEQ_ARMS_SIZE="${SEQ_ARMS_SIZE:-128M}" # ARMS budget for sequential region (hybrid only)
-ITERATIONS="${ITERATIONS:-3}"
+ITERATIONS="${ITERATIONS:-1}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
 #LIB_ARMS_PATH=""
 ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
@@ -76,8 +76,8 @@ launch_experiment() {
     #merci
 
 
-    export BIRCH_INPUT="gapbs_bc_birch.bin"
-    export BIRCH_OUTPUT="gapbs_bc_birch.bin"
+    #export BIRCH_INPUT="gapbs_bc_birch.bin"
+    #export BIRCH_OUTPUT="gapbs_bc_birch.bin"
 
     #export BIRCH_INPUT="liblinear_birch.bin"
     #export BIRCH_OUTPUT="liblinear_birch.bin"
@@ -88,7 +88,7 @@ launch_experiment() {
     export REGENT_TARGET_EXE="train"
     export REGENT_TARGET_EXE="bc"
 
-    export REGENT_RO_BIRCH=1
+    export REGENT_RO_BIRCH=0
     #/users/hjcoffey/workloads/run.sh -b merci -w merci -o "$output_dir" \
     #/users/hjcoffey/working/workloads/run.sh -b micro_interference -w micro_interference -o "$output_dir" \
     #/users/hjcoffey/working/workloads/run.sh -b merci -w merci -o "$output_dir" \
@@ -188,29 +188,29 @@ echo "Running Control Scenarios..."
 #export REGENT_NO_CLUSTERING=1
 #run_control_experiment "control_4.0" "ARMS" "$OUTPUT_BASE/control_ARMS_4_0"
 
-killall run.sh
-
-FAST_MEM="3.5G"          # Fast tier size
-
-export REGENT_NO_CLUSTERING=1
-run_control_experiment "control_3.5" "ARMS" "$OUTPUT_BASE/control_ARMS_3_5"
-
-killall run.sh
-
-FAST_MEM="3G"          # Fast tier size
-
-export REGENT_NO_CLUSTERING=1
-run_control_experiment "control_3.0" "ARMS" "$OUTPUT_BASE/control_ARMS_3_0"
-
-killall run.sh
+#killall run.sh
+#
+#FAST_MEM="3.5G"          # Fast tier size
+#
+#export REGENT_NO_CLUSTERING=1
+#run_control_experiment "control_3.5" "ARMS" "$OUTPUT_BASE/control_ARMS_3_5"
+#
+#killall run.sh
+#
+#FAST_MEM="3G"          # Fast tier size
+#
+#export REGENT_NO_CLUSTERING=1
+#run_control_experiment "control_3.0" "ARMS" "$OUTPUT_BASE/control_ARMS_3_0"
+#
+#killall run.sh
 
 #export REGENT_NO_CLUSTERING=1
 #run_control_experiment "control_ARMS" "ARMS" "$OUTPUT_BASE/control_ARMS"
 
 #killall run.sh
 
-#unset REGENT_NO_CLUSTERING
-#run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_ARMS"
+unset REGENT_NO_CLUSTERING
+run_control_experiment "split_ARMS" "ARMS" "$OUTPUT_BASE/split_ARMS"
 
 #killall run.sh
 #

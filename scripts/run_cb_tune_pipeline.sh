@@ -22,6 +22,14 @@
 
 set -euo pipefail
 
+# Knobs-only mode: REGENT_CLUSTER_CONFIG supplies per-cluster ARMS knobs
+# (cb_multiplier, pebs_kswapd_interval_big, hist_bias_recn), but fast-memory
+# sizing is still driven by regent's two-stage rebalancer (water-fill +
+# surplus). The fast_memory fields in the generated clusters.ini are ignored
+# in this mode. Set REGENT_CLUSTER_KNOBS_ONLY=0 to fall back to the old
+# hardcoded fair-share behavior.
+export REGENT_CLUSTER_KNOBS_ONLY="${REGENT_CLUSTER_KNOBS_ONLY:-1}"
+
 # =============================================================================
 # CONFIGURATION — override any of these via environment variables
 # =============================================================================
@@ -38,12 +46,12 @@ BIRCH_INFO_PATH="${BIRCH_INFO_PATH:-${ARMS_DIR}/birch_info}"
 SUITE="${SUITE:-gapbs}"
 WORKLOAD="${WORKLOAD:-bc}"
 TARGET_EXE="${TARGET_EXE:-bc}"
-FAST_MEM="${FAST_MEM:-8G}"
+FAST_MEM="${FAST_MEM:-4G}"
 BACKUP_FAST_MEMORY="${BACKUP_FAST_MEMORY:-512M}"
 
 # BO settings
-BO_ITERATIONS="${BO_ITERATIONS:-16}"
-N_INITIAL_POINTS="${N_INITIAL_POINTS:-8}"
+BO_ITERATIONS="${BO_ITERATIONS:-40}"
+N_INITIAL_POINTS="${N_INITIAL_POINTS:-10}"
 ITERATIONS_PER_TRIAL="${ITERATIONS_PER_TRIAL:-1}"
 COMPARISON_ITERATIONS="${COMPARISON_ITERATIONS:-5}"
 

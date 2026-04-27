@@ -6,7 +6,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 config_gapbs(){
     num_threads=8
     num_rep=20
-    graph_size=27
+    graph_size=26
     #graph_size=27
     graph_path=$CUR_PATH/gapbs/benchmark/graphs/twitterU.sg
     w_graph_path=$CUR_PATH/gapbs/benchmark/graphs/twitter.wsg
@@ -18,12 +18,16 @@ build_gapbs(){
 
 run_gapbs(){
     local workload=$1
+    local reps="$num_rep"
+    if [[ "$workload" == "tc" ]]; then
+        reps=4
+    fi
 
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
 
     # Create wrapper using utility function
-    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/gapbs/$workload" "-n \"$num_rep\" -g \"$graph_size\"" "export OMP_NUM_THREADS=\"$num_threads\""
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/gapbs/$workload" "-n \"$reps\" -g \"$graph_size\"" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
     run_workload_standard "--cpunodebind=0 -p 0"
