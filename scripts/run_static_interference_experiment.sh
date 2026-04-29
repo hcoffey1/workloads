@@ -112,7 +112,6 @@ run_static_experiment() {
 
     # Unset kernel-mode vars that would conflict
     unset REGENT_REGIONS 2>/dev/null || true
-    unset ARMS_POLICY 2>/dev/null || true
 
     "$WORKLOADS_DIR/run.sh" -b micro_interference \
         -w micro_interference -o "$output_dir" \

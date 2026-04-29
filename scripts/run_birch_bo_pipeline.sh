@@ -69,7 +69,6 @@ step_clustering() {
     # Source clustering experiment functions
     export HEMEMPOL="$LIB_ARMS_PATH"
     export REGENT_FAST_MEMORY="$FAST_MEM"
-    export ARMS_POLICY="${ARMS_POLICY:-ARMS}"
     export REGENT_VISUALIZATION=1
 
     local run_sh="${WORKLOADS_DIR}/run.sh"

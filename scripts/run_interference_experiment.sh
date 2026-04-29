@@ -32,7 +32,6 @@ FAST_MEM="${FAST_MEM:-4G}"          # Fast tier size
 ITERATIONS="${ITERATIONS:-1}"
 LIB_ARMS_PATH="${LIB_ARMS_PATH:-$HOME/working/arms/libarms_kernel.so}"
 #LIB_ARMS_PATH=""
-ARMS_POLICY="${ARMS_POLICY:-ARMS}"  # Policy for control/base (ARMS or lru_ptscan)
 
 
 # Output directory
@@ -109,7 +108,7 @@ run_control_experiment() {
     unset REGENT_NUM_REGIONS
     unset SEQ_VA_RANGE
 
-    export ARMS_POLICY=$policy
+    export REGENT_CLUSTER_POLICY=$policy
     export HEMEMPOL=$LIB_ARMS_PATH
     export REGENT_FAST_MEMORY=$FAST_MEM
 
@@ -135,7 +134,6 @@ run_hybrid_2region_experiment() {
     export REGENT_REGIONS="${seq_policy}:${target_va_range}:${seq_size};${zipf_policy}:0-0:${zipf_size}"
     export REGENT_NUM_REGIONS=2
 
-    export ARMS_POLICY="hybrid"
     export HEMEMPOL=$LIB_ARMS_PATH
     export REGENT_FAST_MEMORY=$FAST_MEM
 

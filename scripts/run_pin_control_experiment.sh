@@ -33,7 +33,7 @@ for default_policy in "${DEFAULT_POLICIES[@]}"; do
       echo "Running default=$default_policy region=$region_policy size=$SIZE -> $run_dir"
 
       REGENT_FAST_MEMORY=$FAST_MEM \
-      ARMS_POLICY=$default_policy \
+      REGENT_CLUSTER_POLICY=$default_policy \
       REGENT_REGIONS=${region_policy}:${REGION_RANGE}:${SIZE} \
       HEMEMPOL=~/arms/libarms_kernel.so ./run.sh \
       -b merci -w merci -o "$run_dir" \

@@ -33,7 +33,6 @@ for UNMAP in "${UNMAP_SETTINGS[@]}"; do
     # 1. Baseline ARMS
     echo "Running Baseline ARMS"
     REGENT_FAST_MEMORY=$FAST_MEM \
-    ARMS_POLICY=ARMS \
     HEMEMPOL=$LIB_ARMS_PATH ./run.sh \
     -b micro_phase -w micro_phase -o "$OUTPUT_DIR/results_arms" \
     -r $ITERATIONS --use-cgroup
@@ -41,7 +40,7 @@ for UNMAP in "${UNMAP_SETTINGS[@]}"; do
     # 2. Baseline LRU (lru_ptscan)
     #echo "Running Baseline LRU"
     #REGENT_FAST_MEMORY=$FAST_MEM \
-    #ARMS_POLICY=lru_ptscan \
+    #REGENT_CLUSTER_POLICY=lru_ptscan \
     #HEMEMPOL=$LIB_ARMS_PATH ./run.sh \
     #-b micro_phase -w micro_phase -o "$OUTPUT_DIR/results_lru_ptscan" \
     #-r $ITERATIONS --use-cgroup

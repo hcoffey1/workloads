@@ -34,13 +34,12 @@ for i in $(seq 0 $N); do
 			   #REGENT_REGIONS=lru:0x7ffd00000000-0x7ffeff000000:256M \
 
 		#   REGENT_FAST_MEMORY=8G \
-		#   ARMS_POLICY=ARMS \
 		#	   HEMEMPOL=~/arms/libarms_kernel.so ./run.sh \
 		#	   -b merci -w merci -o results3/results_lfu_${i} \
 		#	-r 2 #-i pebs -s 1000 --record-vma
 
 		   REGENT_FAST_MEMORY=8G \
-		   ARMS_POLICY=lru \
+		   REGENT_CLUSTER_POLICY=lru_ptscan \
 			   HEMEMPOL=~/arms/libarms_kernel.so ./run.sh \
 			   -b merci -w merci -o results_perf/results_lru_${i} \
 			-r 2 #-i pebs -s 1000 --record-vma

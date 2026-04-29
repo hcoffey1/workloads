@@ -27,7 +27,6 @@ FAST_MEM="${FAST_MEM:-32G}"
 ITERATIONS="${ITERATIONS:-1}"
 ARMS_DIR="${ARMS_DIR:-$HOME/working/arms}"
 ARMS_LIB="libarms_kernel.so"
-ARMS_POLICY="${ARMS_POLICY:-ARMS}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_BASE="${OUTPUT_BASE:-results_clustering_${TIMESTAMP}}"
 
@@ -41,7 +40,7 @@ SHUFFLE_SEED="${SHUFFLE_SEED:-$(date +%s)}"
 # Comment out entries to skip workloads.
 
 WORKLOADS=(
-    "micro_interference:micro_interference:micro_interference"
+    #"micro_interference:micro_interference:micro_interference"
     #"gapbs:bc:bc"
     #"gapbs:bfs:bfs"
     #"gapbs:pr:pr"
@@ -51,7 +50,7 @@ WORKLOADS=(
     #"gapbs:sssp:sssp"
     #"gapbs:tc:tc"
     #"liblinear:liblinear:train"
-    #"merci:merci:eval_baseline"
+    "merci:merci:eval_baseline"
     #"xsbench:xsbench:XSBench"
     #"cloverleaf:cloverleaf:clover_leaf"
     #"silo:silo:dbtest"
@@ -62,7 +61,6 @@ WORKLOADS=(
 # =============================================================================
 
 export REGENT_FAST_MEMORY="$FAST_MEM"
-export ARMS_POLICY="$ARMS_POLICY"
 export REGENT_VISUALIZATION=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -254,7 +252,7 @@ run_phase() {
         run_build_birch "$suite" "$workload" "$target_exe" "$build_dir" "$birch_model"
 
         # Step 2: Read-only run using built model
-        run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
+        # run_ro_birch "$suite" "$workload" "$target_exe" "$ro_dir" "$birch_model"
     done
 }
 
