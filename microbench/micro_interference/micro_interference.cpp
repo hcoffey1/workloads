@@ -33,10 +33,20 @@ static constexpr size_t CLOCK_CHECK_INTERVAL = 4096;
 struct alignas(64) PaddedAtomicBool { std::atomic<bool> val{false}; };
 struct alignas(64) PaddedAtomicU64  { std::atomic<uint64_t> val{0}; };
 
-// Function to update Regent's view of a Region
+// Publish the current bounds of a workload region to a file that
+// libarms_static.so polls (regent_static.cpp reads
+// <bounds_dir>/region_<id>/bounds when its config marks the region's
+// bounds as deferred).  Off by default — the kernel/clustering ARMS
+// variant doesn't consume these files, and the system("mkdir -p ...")
+// call below forks /bin/sh, which under LD_PRELOAD inherits libarms
+// and runs a duplicate arms_start_tiering(), corrupting the per-second
+// vis CSV writers.  Opt in by setting REGENT_REGION_BOUNDS_DIR.
 void update_regent_region(int region_id, uint64_t start, uint64_t end) {
+    const char* bounds_dir = getenv("REGENT_REGION_BOUNDS_DIR");
+    if (!bounds_dir || bounds_dir[0] == '\0') return;
+
     char dir_path[256];
-    snprintf(dir_path, sizeof(dir_path), "/tmp/regent/region_%d", region_id);
+    snprintf(dir_path, sizeof(dir_path), "%s/region_%d", bounds_dir, region_id);
 
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "mkdir -p %s", dir_path);

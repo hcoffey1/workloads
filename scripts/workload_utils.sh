@@ -78,6 +78,16 @@ export DRAMSIZE="$DRAMSIZE"
 export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
 EOF
 
+    # If REGENT_TARGET_EXE is set, propagate it so the LD_PRELOADed library
+    # only initialises in the named binary.  Without this, helper shells
+    # spawned by the workload via system()/popen() inherit LD_PRELOAD and
+    # each runs a duplicate arms_start_tiering(), corrupting the per-second
+    # CSV writers (multiple writers open regent_vis_*.csv in append mode and
+    # interleave their output).
+    if [[ -n "${REGENT_TARGET_EXE:-}" ]]; then
+        echo "export REGENT_TARGET_EXE=\"$REGENT_TARGET_EXE\"" >> "$wrapper_path"
+    fi
+
     # Add any extra environment variables if provided
     if [[ -n "$extra_env_vars" ]]; then
         echo "$extra_env_vars" >> "$wrapper_path"
