@@ -40,7 +40,7 @@ SHUFFLE_SEED="${SHUFFLE_SEED:-$(date +%s)}"
 # Comment out entries to skip workloads.
 
 WORKLOADS=(
-    "micro_interference:micro_interference:micro_interference"
+    #"micro_interference:micro_interference:micro_interference"
     #"gapbs:bc:bc"
     #"gapbs:bfs:bfs"
     #"gapbs:pr:pr"
@@ -54,6 +54,8 @@ WORKLOADS=(
     #"xsbench:xsbench:XSBench"
     #"cloverleaf:cloverleaf:clover_leaf"
     #"silo:silo:dbtest"
+    "duckdb:tpcds_sf100:benchmark_runner"
+    "faiss:sift1M:demo_sift1M"
 )
 
 # =============================================================================

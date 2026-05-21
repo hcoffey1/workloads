@@ -5,24 +5,21 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 set -x
 
 config_npb-cpp(){
-    # Set TBB paths for later use
-    export TBB_ROOT="$CUR_PATH/NPB-CPP/libs/tbb-2020.1"
-    export TBB_BIN="$TBB_ROOT/build/linux_intel64_gcc_cc11.4.0_libc2.35_kernel5.1.0_release"
-
-    pushd $TBB_ROOT
-    make -j $(nproc)
-    popd
-
-    set +u
-    source $TBB_BIN/tbbvars.sh
-    set -u
-
     NPB_CLASS=D
+    num_threads=8
 }
 
 build_npb-cpp(){
     local workload=$1
-    (cd $CUR_PATH/NPB-CPP/NPB-PSTL && make -j$(nproc) $workload CLASS=$NPB_CLASS)
+    # NPB's benchmark subdirs invoke ../sys/setparams to generate npbparams.hpp;
+    # with `make -j` the sys/setparams build can race with that invocation, so
+    # build setparams sequentially first.
+    # `make clean` first: NPB doesn't reliably invalidate stale .o/npbparams.hpp
+    # when only CLASS changes, so switching from e.g. C→D otherwise yields the
+    # old binary. Cheap to rebuild from scratch.
+    (cd $CUR_PATH/NPB-CPP/NPB-OMP && make clean) && \
+    (cd $CUR_PATH/NPB-CPP/NPB-OMP/sys && make) && \
+    (cd $CUR_PATH/NPB-CPP/NPB-OMP && make -j$(nproc) $workload CLASS=$NPB_CLASS)
 }
 
 run_npb-cpp(){
@@ -31,17 +28,12 @@ run_npb-cpp(){
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
 
-    # Prepare TBB environment variables for the wrapper
-    local tbb_env="export TBBROOT=\"$TBB_ROOT\"
-export CPATH=\"$TBB_ROOT/include:\$CPATH\"
-export LIBRARY_PATH=\"$TBB_BIN:\$LIBRARY_PATH\"
-export LD_LIBRARY_PATH=\"$TBB_BIN:\$LD_LIBRARY_PATH\""
-
-    # Create wrapper using utility function with TBB environment
-    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/NPB-CPP/NPB-PSTL/bin/${workload}.${NPB_CLASS}" "" "$tbb_env"
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" \
+        "$CUR_PATH/NPB-CPP/NPB-OMP/bin/${workload}.${NPB_CLASS}" "" \
+        "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 
     start_bwmon
 }

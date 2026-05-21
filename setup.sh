@@ -4,7 +4,8 @@ git submodule init
 git submodule update
 
 sudo apt update
-sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich -y
+#intel-mkl needed for Faiss as its BLAS library.
+sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich intel-mkl -y
 
 conda tos accept
 conda create -n dataVis pandas matplotlib seaborn -y
@@ -70,6 +71,9 @@ cd ../..
 
 # silo
 cd silo/silo
+pushd third-party/lz4
+make library
+popd
 git apply ../../patches/silo.patch
 make dbtest -j20
 cd ../..
