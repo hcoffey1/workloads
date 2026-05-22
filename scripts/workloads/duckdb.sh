@@ -20,8 +20,23 @@ config_duckdb(){
             cache_suite="tpcds"
             cache_sf=100
             ;;
-        tpcds_sf100_q10)
+        tpcds_sf100_qr10)
+            # "Query Range 10": the first ten queries (q01..q10).
+            # Renamed from `tpcds_sf100_q10` so that name can mean single-query q10.
             benchmark_pattern="benchmark/large/tpcds-sf100/q(0[1-9]|10)\.benchmark"
+            cache_db="tpcds_sf100.duckdb"
+            cache_suite="tpcds"
+            cache_sf=100
+            ;;
+        tpcds_sf100_q[0-9]*)
+            # Single-query variant: tpcds_sf100_q<NN>, NN in 01..99 (zero-padded).
+            # Matches /benchmark/large/tpcds-sf100/q<NN>.benchmark exactly.
+            local _qnum="${_workload#tpcds_sf100_q}"
+            if ! [[ "$_qnum" =~ ^0[1-9]$|^[1-9][0-9]$ ]]; then
+                echo "ERROR: tpcds_sf100_q<NN> requires zero-padded 01..99; got 'q$_qnum'" >&2
+                exit 1
+            fi
+            benchmark_pattern="benchmark/large/tpcds-sf100/q${_qnum}\.benchmark"
             cache_db="tpcds_sf100.duckdb"
             cache_suite="tpcds"
             cache_sf=100
@@ -40,7 +55,7 @@ config_duckdb(){
             ;;
         *)
             echo "ERROR: unknown duckdb workload '$_workload'" >&2
-            echo "Valid workloads: tpcds_sf100, tpcds_sf100_q10, tpch_sf100, ingestion, other_large" >&2
+            echo "Valid workloads: tpcds_sf100, tpcds_sf100_qr10 (first 10), tpcds_sf100_q<NN> (single, 01..99), tpch_sf100, ingestion, other_large" >&2
             exit 1
             ;;
     esac
@@ -73,7 +88,8 @@ run_duckdb(){
     timings_file+="_timings.txt"
 
     local binary_path="$CUR_PATH/duckdb/build/release/benchmark/benchmark_runner"
-    local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --no-warmup --out=\"$timings_file\" \"$benchmark_pattern\""
+    local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --out=\"$timings_file\" \"$benchmark_pattern\""
+    #local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --no-warmup --out=\"$timings_file\" \"$benchmark_pattern\""
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "$binary_args"
 
