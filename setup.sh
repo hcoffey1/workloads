@@ -7,6 +7,9 @@ sudo apt update
 #intel-mkl needed for Faiss as its BLAS library.
 sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich intel-mkl -y
 
+# For renaissance Java benchmarks
+sudo apt-get install openjdk-21-jdk -y
+
 conda tos accept
 conda create -n dataVis pandas matplotlib seaborn -y
 

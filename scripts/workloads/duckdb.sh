@@ -88,8 +88,8 @@ run_duckdb(){
     timings_file+="_timings.txt"
 
     local binary_path="$CUR_PATH/duckdb/build/release/benchmark/benchmark_runner"
-    local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --out=\"$timings_file\" \"$benchmark_pattern\""
-    #local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --no-warmup --out=\"$timings_file\" \"$benchmark_pattern\""
+    #local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --out=\"$timings_file\" \"$benchmark_pattern\""
+    local binary_args="--root-dir \"$CUR_PATH/duckdb\" --threads=$num_threads --disable-timeout --no-warmup --out=\"$timings_file\" \"$benchmark_pattern\""
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "$binary_args"
 
