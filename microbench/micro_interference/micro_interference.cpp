@@ -19,6 +19,14 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <fstream>
+#include <cctype>
+
+#if defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#define CPU_PAUSE() _mm_pause()
+#else
+#define CPU_PAUSE() std::this_thread::yield()
+#endif
 
 std::chrono::steady_clock::time_point g_start_time;
 std::chrono::steady_clock::time_point g_phase_start_time;
@@ -87,6 +95,48 @@ void annotate_event(const std::string& msg) {
         outfile << std::fixed << std::setprecision(6) << elapsed.count() << " " << msg << "\n";
         outfile.close();
     }
+}
+
+// =============================================================================
+// COUNT PARSING (decimal suffixes: k=1e3, m=1e6, g=1e9)
+// =============================================================================
+
+// Parse a count like "1k", "2m", "4g", "1.5m", or a bare integer "5000".
+// Suffixes are decimal and case-insensitive. On any malformed input this
+// prints an error and exits, since these come from CLI args.
+static uint64_t parse_count(const char* arg) {
+    std::string s(arg);
+    if (s.empty()) {
+        std::cerr << "Invalid count: empty value\n";
+        exit(1);
+    }
+    uint64_t mult = 1;
+    char last = static_cast<char>(std::tolower(static_cast<unsigned char>(s.back())));
+    if (last == 'k') { mult = 1000ULL; s.pop_back(); }
+    else if (last == 'm') { mult = 1000000ULL; s.pop_back(); }
+    else if (last == 'g') { mult = 1000000000ULL; s.pop_back(); }
+    else if (!std::isdigit(static_cast<unsigned char>(last))) {
+        std::cerr << "Invalid count suffix in '" << arg
+                  << "' (use k/m/g or a bare integer)\n";
+        exit(1);
+    }
+    if (s.empty()) {
+        std::cerr << "Invalid count '" << arg << "': no number before suffix\n";
+        exit(1);
+    }
+    size_t pos = 0;
+    double base = 0.0;
+    try {
+        base = std::stod(s, &pos);
+    } catch (...) {
+        std::cerr << "Invalid count '" << arg << "'\n";
+        exit(1);
+    }
+    if (pos != s.size() || base < 0.0) {
+        std::cerr << "Invalid count '" << arg << "'\n";
+        exit(1);
+    }
+    return static_cast<uint64_t>(base * static_cast<double>(mult));
 }
 
 // =============================================================================
@@ -223,6 +273,61 @@ struct WorkerConfig {
 };
 
 // =============================================================================
+// SYNC (zone-aggregate lockstep barrier)
+// =============================================================================
+//
+// The two zones (sequential, zipfian) can synchronize round-for-round. A round
+// of a zone is `my_n` aggregate accesses by that zone (summed across its
+// workers): completed_rounds = floor(zone_aggregate_ops / my_n). Zones advance
+// in lockstep: a zone may be at most one round ahead of its partner, then all
+// its workers stall (busy-spin) until the partner catches up. See
+// docs/adr/0001-zone-aggregate-lockstep-sync.md for why this is zone-level and
+// not a per-thread barrier (seq threads start staggered).
+struct SyncConfig {
+    bool enabled = false;
+    uint64_t my_n = 0;        // this zone's accesses per round
+    uint64_t partner_n = 0;   // partner zone's accesses per round
+};
+
+// Compute the per-worker flush/check cadence. With sync on we shrink it so a
+// small `my_n` doesn't overshoot rounds via the default 4096-batch.
+static uint64_t sync_check_interval(const SyncConfig& sc, uint64_t default_interval) {
+    if (!sc.enabled) return default_interval;
+    uint64_t fine = sc.my_n / 16;
+    if (fine < 1) fine = 1;
+    if (fine > 1024) fine = 1024;
+    return fine;
+}
+
+// Stall this zone's worker while it is more rounds ahead than the partner.
+// `my_ops` must already include this worker's just-flushed accesses. Accumulates
+// stalled wall-time into `stall_ns`. Polls `global_stop` so shutdown never hangs.
+static inline void sync_barrier_wait(
+    const SyncConfig& sc,
+    std::atomic<uint64_t>& my_ops,
+    std::atomic<uint64_t>& partner_ops,
+    std::atomic<bool>& global_stop,
+    std::atomic<uint64_t>& stall_ns
+) {
+    if (!sc.enabled) return;
+    uint64_t my_completed = my_ops.load(std::memory_order_relaxed) / sc.my_n;
+    uint64_t partner_completed = partner_ops.load(std::memory_order_relaxed) / sc.partner_n;
+    if (my_completed <= partner_completed) return;
+
+    auto stall_start = std::chrono::steady_clock::now();
+    while (!global_stop.load(std::memory_order_relaxed)) {
+        partner_completed = partner_ops.load(std::memory_order_relaxed) / sc.partner_n;
+        if (my_completed <= partner_completed) break;
+        CPU_PAUSE();
+    }
+    auto stall_end = std::chrono::steady_clock::now();
+    stall_ns.fetch_add(
+        static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(stall_end - stall_start).count()),
+        std::memory_order_relaxed);
+}
+
+// =============================================================================
 // SEQUENTIAL WORKER
 // =============================================================================
 
@@ -233,9 +338,13 @@ static void sequential_worker(
     std::atomic<bool>& global_stop,
     std::atomic<uint64_t>& op_counter,
     std::atomic<bool>& worker_done,
-    int thread_id
+    int thread_id,
+    const SyncConfig& sync,
+    std::atomic<uint64_t>& partner_ops,
+    std::atomic<uint64_t>& stall_ns
 ) {
     using Clock = std::chrono::steady_clock;
+    const uint64_t check_interval = sync_check_interval(sync, CLOCK_CHECK_INTERVAL);
 
     // Deterministic RNG seeding for reproducible access patterns across runs
     std::mt19937 rng(42 + thread_id);
@@ -301,8 +410,10 @@ static void sequential_worker(
         if (num_accesses > 0) {
             std::uniform_int_distribution<size_t> dist(0, num_accesses - 1);
             uint64_t local_ops = 0;
+            uint64_t since_check = 0;
             for (size_t i = 0; i < num_accesses; i++) {
-                if ((i & (CLOCK_CHECK_INTERVAL - 1)) == 0) {
+                if (++since_check >= check_interval) {
+                    since_check = 0;
                     if (global_stop.load(std::memory_order_relaxed)) break;
 
                     // Re-check phase transition periodically within inner loop
@@ -314,11 +425,12 @@ static void sequential_worker(
                         break; // Break out to restart with the new region
                     }
 
-                    // Flush local ops to shared counter
+                    // Flush local ops to shared counter, then honor the sync barrier
                     if (local_ops > 0) {
                         op_counter.fetch_add(local_ops, std::memory_order_relaxed);
                         local_ops = 0;
                     }
+                    sync_barrier_wait(sync, op_counter, partner_ops, global_stop, stall_ns);
                 }
 
                 size_t idx = dist(rng);
@@ -350,9 +462,13 @@ static void zipfian_worker(
     std::atomic<bool>& global_stop,
     std::atomic<uint64_t>& op_counter,
     std::atomic<bool>& worker_done,
-    int thread_id
+    int thread_id,
+    const SyncConfig& sync,
+    std::atomic<uint64_t>& partner_ops,
+    std::atomic<uint64_t>& stall_ns
 ) {
     using Clock = std::chrono::steady_clock;
+    const uint64_t check_interval = sync_check_interval(sync, CLOCK_CHECK_INTERVAL);
 
     // Handle delay
     if (config.delay_sec > 0) {
@@ -377,10 +493,11 @@ static void zipfian_worker(
     auto runtime_ms = static_cast<int64_t>(config.runtime_sec * 1000);
 
     uint64_t local_ops = 0;
-    size_t iter_count = 0;
+    uint64_t since_check = 0;
 
     while (true) {
-        if ((iter_count & (CLOCK_CHECK_INTERVAL - 1)) == 0) {
+        if (++since_check >= check_interval) {
+            since_check = 0;
             if (global_stop.load(std::memory_order_relaxed)) break;
 
             // Check runtime limit
@@ -391,11 +508,12 @@ static void zipfian_worker(
                 }
             }
 
-            // Flush local ops to shared counter
+            // Flush local ops to shared counter, then honor the sync barrier
             if (local_ops > 0) {
                 op_counter.fetch_add(local_ops, std::memory_order_relaxed);
                 local_ops = 0;
             }
+            sync_barrier_wait(sync, op_counter, partner_ops, global_stop, stall_ns);
         }
 
         size_t idx = zipf.next();
@@ -405,7 +523,6 @@ static void zipfian_worker(
             *p = (*p) + 1;
             local_ops++;
         }
-        iter_count++;
     }
 
     // Flush remaining local ops
@@ -445,6 +562,19 @@ static void print_usage(const char* prog) {
               << "  --zipf-delay <sec>       Delay before starting zipfian (default: 0)\n"
               << "  --zipf-runtime <sec>     Runtime for zipfian (0 = global duration)\n"
               << "  --zipf-threads <n>       Number of zipfian threads (default: 1)\n"
+              << "\nSync Options (zone-aggregate lockstep barrier):\n"
+              << "  --seq-sync <count>       Sequential zone accesses per round (e.g. 1k, 2m)\n"
+              << "  --zipf-sync <count>      Zipfian zone accesses per round (e.g. 1k, 2m)\n"
+              << "                           Both must be set together to enable sync. Each\n"
+              << "                           zone runs its count of accesses per round; the\n"
+              << "                           faster zone stalls at the round boundary until\n"
+              << "                           the slower zone catches up. Counts use decimal\n"
+              << "                           suffixes k=1e3, m=1e6, g=1e9.\n"
+              << "  --sync-rounds <K>        Stop once both zones complete K rounds (fixed\n"
+              << "                           work); --duration still applies as a safety cap.\n"
+              << "                           Requires --seq-sync/--zipf-sync.\n"
+              << "                           Note: sync requires both zones enabled, >=1 thread\n"
+              << "                           each, and no per-zone --seq-runtime/--zipf-runtime.\n"
               << "\nOutput Format (stdout):\n"
               << "  [DATA], timestamp_sec, seq_ops, zipf_ops, seq_throughput, zipf_throughput\n";
 }
@@ -477,6 +607,13 @@ int main(int argc, char** argv) {
     double zipf_delay = 0.0;
     double zipf_runtime = 0.0;
     int zipf_threads = 1;
+
+    // Sync defaults (0 = disabled)
+    uint64_t seq_sync_n = 0;
+    uint64_t zipf_sync_n = 0;
+    bool seq_sync_set = false;
+    bool zipf_sync_set = false;
+    uint64_t sync_rounds = 0; // 0 = time-based termination
 
     // --- Parse arguments ---
     for (int i = 1; i < argc; i++) {
@@ -516,6 +653,14 @@ int main(int argc, char** argv) {
             zipf_runtime = std::stod(argv[++i]);
         } else if (arg == "--zipf-threads" && i + 1 < argc) {
             zipf_threads = std::stoi(argv[++i]);
+        } else if (arg == "--seq-sync" && i + 1 < argc) {
+            seq_sync_n = parse_count(argv[++i]);
+            seq_sync_set = true;
+        } else if (arg == "--zipf-sync" && i + 1 < argc) {
+            zipf_sync_n = parse_count(argv[++i]);
+            zipf_sync_set = true;
+        } else if (arg == "--sync-rounds" && i + 1 < argc) {
+            sync_rounds = parse_count(argv[++i]);
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             print_usage(argv[0]);
@@ -530,6 +675,40 @@ int main(int argc, char** argv) {
     if (seq_threads < 0) seq_threads = 0;
     if (zipf_threads < 0) zipf_threads = 0;
     if (seq_time_offset < 0) seq_time_offset = 0.0;
+
+    // --- Validate sync (zone-aggregate lockstep barrier) ---
+    // Sync is enabled when both per-zone counts are given. Asymmetric configs are
+    // rejected so the barrier never needs live-worker tracking and cannot
+    // dead-stall a surviving zone (see docs/adr/0001-...).
+    bool sync_enabled = seq_sync_set || zipf_sync_set;
+    if (sync_enabled) {
+        if (seq_sync_set != zipf_sync_set) {
+            std::cerr << "Error: --seq-sync and --zipf-sync must be set together\n";
+            return 1;
+        }
+        if (seq_sync_n == 0 || zipf_sync_n == 0) {
+            std::cerr << "Error: sync counts must be > 0\n";
+            return 1;
+        }
+        if (zipf_region_mb == 0) {
+            std::cerr << "Error: sync requires the zipfian zone enabled (--zipf-region-mb > 0)\n";
+            return 1;
+        }
+        if (seq_threads < 1 || zipf_threads < 1) {
+            std::cerr << "Error: sync requires at least 1 thread per zone "
+                         "(--seq-threads >= 1, --zipf-threads >= 1)\n";
+            return 1;
+        }
+        if (seq_runtime != 0.0 || zipf_runtime != 0.0) {
+            std::cerr << "Error: sync forbids per-zone runtime "
+                         "(--seq-runtime/--zipf-runtime must be 0)\n";
+            return 1;
+        }
+    }
+    if (sync_rounds > 0 && !sync_enabled) {
+        std::cerr << "Error: --sync-rounds requires --seq-sync and --zipf-sync\n";
+        return 1;
+    }
 
     // --- Print Configuration ---
     std::cout << "micro_interference: duration=" << duration_sec << "s"
@@ -547,6 +726,16 @@ int main(int argc, char** argv) {
                   << " threads=" << zipf_threads << "\n";
     } else {
         std::cout << "  Zipfian: disabled\n";
+    }
+    if (sync_enabled) {
+        std::cout << "  Sync: enabled  seq_sync=" << seq_sync_n
+                  << " zipf_sync=" << zipf_sync_n << " accesses/round";
+        if (sync_rounds > 0) {
+            std::cout << "  stop_after=" << sync_rounds << " rounds (duration as cap)";
+        }
+        std::cout << "\n";
+    } else {
+        std::cout << "  Sync: disabled\n";
     }
 
     // --- Allocate Sequential Regions ---
@@ -672,6 +861,14 @@ int main(int argc, char** argv) {
     std::vector<PaddedAtomicBool> seq_done(seq_threads);
     std::vector<PaddedAtomicBool> zipf_done(zipf_threads);
 
+    // Per-worker accumulated stall time (ns); reported per zone as the max.
+    std::vector<PaddedAtomicU64> seq_stall(seq_threads);
+    std::vector<PaddedAtomicU64> zipf_stall(zipf_threads);
+
+    // Per-zone sync params (partner counts swapped).
+    SyncConfig seq_sync_cfg{sync_enabled, seq_sync_n, zipf_sync_n};
+    SyncConfig zipf_sync_cfg{sync_enabled, zipf_sync_n, seq_sync_n};
+
     // --- Set global phase start timestamp (all workers sync to this) ---
     g_phase_start_time = std::chrono::steady_clock::now();
 
@@ -682,7 +879,8 @@ int main(int argc, char** argv) {
     for (int t = 0; t < seq_threads; t++) {
         threads.emplace_back(sequential_worker,
                              std::ref(seq_region_vec), seq_stride, seq_config,
-                             std::ref(global_stop.val), std::ref(seq_ops.val), std::ref(seq_done[t].val), t);
+                             std::ref(global_stop.val), std::ref(seq_ops.val), std::ref(seq_done[t].val), t,
+                             std::cref(seq_sync_cfg), std::ref(zipf_ops.val), std::ref(seq_stall[t].val));
     }
 
     if (zipf_region_mb > 0) {
@@ -690,7 +888,8 @@ int main(int argc, char** argv) {
         for (int t = 0; t < zipf_threads; t++) {
             threads.emplace_back(zipfian_worker,
                                  std::ref(zipf_region), zipf_item_size, zipf_theta, zipf_config,
-                                 std::ref(global_stop.val), std::ref(zipf_ops.val), std::ref(zipf_done[t].val), t);
+                                 std::ref(global_stop.val), std::ref(zipf_ops.val), std::ref(zipf_done[t].val), t,
+                                 std::cref(zipf_sync_cfg), std::ref(seq_ops.val), std::ref(zipf_stall[t].val));
         }
     }
 
@@ -703,8 +902,14 @@ int main(int argc, char** argv) {
     uint64_t last_zipf_ops = 0;
     double last_sample_time = 0.0;
 
+    // In rounds mode, poll finer than the data-sampling cadence so the measured
+    // total runtime isn't quantized to a (possibly large) --sample-period.
+    int poll_ms = sample_period_ms;
+    if (sync_rounds > 0 && poll_ms > 20) poll_ms = 20;
+    const char* term_reason = "duration";
+
     while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(sample_period_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_ms));
 
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - benchmark_start).count();
@@ -713,35 +918,55 @@ int main(int argc, char** argv) {
         uint64_t cur_seq_ops = seq_ops.val.load(std::memory_order_relaxed);
         uint64_t cur_zipf_ops = zipf_ops.val.load(std::memory_order_relaxed);
 
-        // Calculate throughput
-        double dt = elapsed - last_sample_time;
-        double seq_tput = (dt > 0) ? static_cast<double>(cur_seq_ops - last_seq_ops) / dt : 0.0;
-        double zipf_tput = (dt > 0) ? static_cast<double>(cur_zipf_ops - last_zipf_ops) / dt : 0.0;
-
-        std::cout << "[DATA], " << std::fixed << std::setprecision(3) << elapsed
-                  << ", " << cur_seq_ops << ", " << cur_zipf_ops
-                  << ", " << std::setprecision(0) << seq_tput << ", " << zipf_tput << "\n";
-        std::cout.flush();
-
-        last_seq_ops = cur_seq_ops;
-        last_zipf_ops = cur_zipf_ops;
-        last_sample_time = elapsed;
-
-        // Check termination
+        // --- Determine termination (so we can emit a final sample on exit) ---
+        bool terminate = false;
         if (elapsed >= duration_sec) {
-            global_stop.val.store(true, std::memory_order_relaxed);
-            break;
+            terminate = true;
+            term_reason = (sync_rounds > 0) ? "duration-cap" : "duration";
+        }
+        if (!terminate && sync_rounds > 0) {
+            uint64_t seq_completed = cur_seq_ops / seq_sync_n;
+            uint64_t zipf_completed = cur_zipf_ops / zipf_sync_n;
+            if (seq_completed >= sync_rounds && zipf_completed >= sync_rounds) {
+                terminate = true;
+                term_reason = "rounds";
+            }
+        }
+        if (!terminate) {
+            // All workers finished on their own (finite per-zone runtime; not
+            // possible while sync is enabled, kept for the non-sync path).
+            bool all_done = true;
+            for (int i = 0; i < seq_threads; i++) {
+                if (!seq_done[i].val.load(std::memory_order_relaxed)) all_done = false;
+            }
+            for (int i = 0; i < zipf_threads; i++) {
+                if (!zipf_done[i].val.load(std::memory_order_relaxed)) all_done = false;
+            }
+            if (all_done) {
+                terminate = true;
+                term_reason = "workers-done";
+            }
         }
 
-        // Check if all workers with finite runtime are done
-        bool all_done = true;
-        for (int i = 0; i < seq_threads; i++) {
-            if (!seq_done[i].val.load(std::memory_order_relaxed)) all_done = false;
+        // --- Emit a [DATA] sample at the sampling cadence, and on termination ---
+        bool do_emit = terminate ||
+            ((elapsed - last_sample_time) * 1000.0 >= sample_period_ms - 0.5);
+        if (do_emit) {
+            double dt = elapsed - last_sample_time;
+            double seq_tput = (dt > 0) ? static_cast<double>(cur_seq_ops - last_seq_ops) / dt : 0.0;
+            double zipf_tput = (dt > 0) ? static_cast<double>(cur_zipf_ops - last_zipf_ops) / dt : 0.0;
+
+            std::cout << "[DATA], " << std::fixed << std::setprecision(3) << elapsed
+                      << ", " << cur_seq_ops << ", " << cur_zipf_ops
+                      << ", " << std::setprecision(0) << seq_tput << ", " << zipf_tput << "\n";
+            std::cout.flush();
+
+            last_seq_ops = cur_seq_ops;
+            last_zipf_ops = cur_zipf_ops;
+            last_sample_time = elapsed;
         }
-        for (int i = 0; i < zipf_threads; i++) {
-            if (!zipf_done[i].val.load(std::memory_order_relaxed)) all_done = false;
-        }
-        if (all_done) {
+
+        if (terminate) {
             global_stop.val.store(true, std::memory_order_relaxed);
             break;
         }
@@ -765,6 +990,31 @@ int main(int argc, char** argv) {
     std::cout << "Total Time: " << std::fixed << std::setprecision(3) << total_time << " s\n";
     std::cout << "Sequential Ops: " << final_seq << " (" << static_cast<double>(final_seq) / total_time << " ops/s)\n";
     std::cout << "Zipfian Ops: " << final_zipf << " (" << static_cast<double>(final_zipf) / total_time << " ops/s)\n";
+    if (sync_enabled) {
+        // Per-zone wall-clock stall = max across that zone's workers (the zone
+        // stalls as a unit, so the max approximates the time the zone was blocked).
+        uint64_t seq_stall_ns = 0;
+        for (int i = 0; i < seq_threads; i++) {
+            seq_stall_ns = std::max(seq_stall_ns, seq_stall[i].val.load());
+        }
+        uint64_t zipf_stall_ns = 0;
+        for (int i = 0; i < zipf_threads; i++) {
+            zipf_stall_ns = std::max(zipf_stall_ns, zipf_stall[i].val.load());
+        }
+        uint64_t seq_completed = final_seq / seq_sync_n;
+        uint64_t zipf_completed = final_zipf / zipf_sync_n;
+        std::cout << "Sync: enabled  seq_sync=" << seq_sync_n
+                  << " zipf_sync=" << zipf_sync_n << " accesses/round\n";
+        std::cout << "  Terminated by: " << term_reason;
+        if (sync_rounds > 0) std::cout << " (target " << sync_rounds << " rounds)";
+        std::cout << "\n";
+        std::cout << "  Sequential: rounds=" << seq_completed
+                  << " stall=" << std::setprecision(3)
+                  << static_cast<double>(seq_stall_ns) / 1e9 << " s\n";
+        std::cout << "  Zipfian:    rounds=" << zipf_completed
+                  << " stall=" << std::setprecision(3)
+                  << static_cast<double>(zipf_stall_ns) / 1e9 << " s\n";
+    }
     std::cout << "=============================\n";
 
     // --- Cleanup ---

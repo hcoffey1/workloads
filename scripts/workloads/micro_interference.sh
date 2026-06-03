@@ -29,6 +29,16 @@ config_micro_interference() {
     ZIPF_DELAY="${ZIPF_DELAY:-0}"                     # Delay before starting (seconds)
     ZIPF_RUNTIME="${ZIPF_RUNTIME:-0}"                 # Runtime (0 = global duration)
     ZIPF_THREADS="${ZIPF_THREADS:-8}"                 # Number of threads
+
+    # Sync settings (zone-aggregate lockstep barrier). Both SEQ_SYNC and
+    # ZIPF_SYNC must be set (per-zone accesses/round, decimal suffixes k/m/g,
+    # e.g. 500m) to enable the barrier; the binary rejects a half-set config.
+    # SYNC_ROUNDS stops the run after that many completed rounds, with --duration
+    # (INTERFERENCE_DURATION) retained as a safety cap. Leave unset for the
+    # legacy time-based run. See microbench/micro_interference/docs/adr/0001.
+    SEQ_SYNC="${SEQ_SYNC:-}"                           # Sequential zone accesses/round
+    ZIPF_SYNC="${ZIPF_SYNC:-}"                         # Zipfian zone accesses/round
+    SYNC_ROUNDS="${SYNC_ROUNDS:-}"                     # Stop after N rounds (unset = time-based)
 }
 
 build_micro_interference() {
@@ -115,6 +125,16 @@ run_micro_interference() {
     args="$args --zipf-delay $ZIPF_DELAY"
     args="$args --zipf-runtime $ZIPF_RUNTIME"
     args="$args --zipf-threads $ZIPF_THREADS"
+
+    # Sync args (zone-aggregate lockstep barrier). Only emit when both per-zone
+    # counts are set; the binary rejects an asymmetric/half-set config. --duration
+    # (above) stays as the safety cap when --sync-rounds terminates the run.
+    if [[ -n "$SEQ_SYNC" && -n "$ZIPF_SYNC" ]]; then
+        args="$args --seq-sync $SEQ_SYNC --zipf-sync $ZIPF_SYNC"
+        if [[ -n "$SYNC_ROUNDS" ]]; then
+            args="$args --sync-rounds $SYNC_ROUNDS"
+        fi
+    fi
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args" "$extra_envs"
     run_workload_standard "--cpunodebind=0 -p 0"
