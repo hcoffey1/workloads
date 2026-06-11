@@ -41,6 +41,7 @@ create_workload_wrapper() {
     local binary_path="$3"
     local binary_args="${4:-}"
     local extra_env_vars="${5:-}"  # Optional extra environment variables
+    local work_dir="${6:-}"        # Optional working directory to cd into before exec
 
     # Validate required parameters
     if [[ -z "$wrapper_path" ]]; then
@@ -91,6 +92,14 @@ EOF
     # Add any extra environment variables if provided
     if [[ -n "$extra_env_vars" ]]; then
         echo "$extra_env_vars" >> "$wrapper_path"
+    fi
+
+    # Change into the workload's working directory if requested.  SPEC and other
+    # benchmarks must run from a staged run directory so they find their input
+    # files and write outputs alongside them.
+    if [[ -n "$work_dir" ]]; then
+        echo "" >> "$wrapper_path"
+        echo "cd \"$work_dir\"" >> "$wrapper_path"
     fi
 
     # Add the exec command

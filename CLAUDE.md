@@ -91,3 +91,4 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `cachelib` | `cachelib` | |
 | `ann-solo` | `ann-solo` | |
 | `mscrush` | `mscrush` | |
+| `spec` | `mcf`, `lbm`, `omnetpp`, `xalancbmk`, `cactuBSSN`, `fotonik3d`, `roms` (also `deepsjeng`, `leela`, `imagick`) | SPEC CPU2017 refrate, clean -O3 gcc build. Built by `./setup.sh` when the SPEC source is present (`SPEC_SRC`, default `/proj/instrument-PG0/spec`); auto-skipped otherwise, force-skip with `BUILD_SPEC=0`. Override run path with `SPEC_PATH`. `parest` excluded (deal.II doesn't build with gcc 11). See `docs/spec2017_integration.md`. |

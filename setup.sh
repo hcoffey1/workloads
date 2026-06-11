@@ -33,7 +33,7 @@ cd ..
 # GAPBS
 cd gapbs
 git apply ../patches/gapbs.patch
-make bench-graphs -j2
+#make bench-graphs -j2
 make -j20
 cd ..
 
@@ -99,3 +99,59 @@ popd
 
 # For solo-ann
 sudo apt update && sudo apt install -y python3.10-venv python3.10-dev
+
+# ==============================================================================
+# SPEC CPU2017 (built when the source tree is available; auto-skipped otherwise)
+# ==============================================================================
+# Copies a SPEC install locally, writes a clean (non-XRay) -O3 gcc config, then
+# builds and stages refrate run dirs for the memory-intensive subset used by
+# scripts/workloads/spec.sh.  Heavy (~9GB copy + compile).  Runs by default when
+# the source tree is present; auto-skips otherwise.  Force-skip with BUILD_SPEC=0.
+SPEC_SRC="${SPEC_SRC:-/proj/instrument-PG0/spec}"
+SPEC_DEST="${SPEC_DEST:-$HOME/spec}"
+if [[ "${BUILD_SPEC:-1}" == "0" ]]; then
+    echo "[spec] BUILD_SPEC=0; skipping SPEC build."
+elif [[ ! -d "$SPEC_SRC" ]]; then
+    echo "[spec] SPEC source not found at $SPEC_SRC; skipping SPEC build."
+    echo "[spec] To enable, set SPEC_SRC=/path/to/spec (a SPEC CPU2017 install) and re-run."
+else (
+    echo "[spec] installing build toolchain (gcc/g++/gfortran/rsync)"
+    sudo apt install -y gcc g++ gfortran rsync
+    # Single-invocation, memory-intensive subset that builds cleanly with system
+    # gcc 11 (see docs/spec2017_integration.md). 510.parest_r is intentionally
+    # excluded: its deal.II sources don't compile with gcc 11.
+    SPEC_BENCHMARKS="${SPEC_BENCHMARKS:-505.mcf_r 519.lbm_r 520.omnetpp_r 523.xalancbmk_r 507.cactuBSSN_r 549.fotonik3d_r 554.roms_r}"
+
+    echo "[spec] copying $SPEC_SRC -> $SPEC_DEST"
+    mkdir -p "$SPEC_DEST"
+    # Skip the source tarball, prior (XRay) build artifacts, and results; we rebuild clean.
+    rsync -a \
+        --exclude 'cpu2017.tar.xz' \
+        --exclude 'result/' \
+        --exclude '*.log' \
+        --exclude 'benchspec/CPU/*/run/' \
+        --exclude 'benchspec/CPU/*/build/' \
+        --exclude 'benchspec/CPU/*/exe/' \
+        "$SPEC_SRC/" "$SPEC_DEST/"
+
+    echo "[spec] writing clean-gcc config (system gcc, -O3 -march=native, no XRay)"
+    cp "$SPEC_DEST/config/Example-gcc-linux-x86.cfg" "$SPEC_DEST/config/clean-gcc.cfg"
+    sed -i -E 's|(define[[:space:]]+gcc_dir[[:space:]]+).*|\1/usr|' "$SPEC_DEST/config/clean-gcc.cfg"
+    sed -i 's|%define label mytest|%define label clean|' "$SPEC_DEST/config/clean-gcc.cfg"
+    # gcc 11 defaults to gnu++17, whose 3-arg std::hypot overload breaks
+    # omnetpp's Define_Function3(SPEC_HYPOT,2,...) registration at runtime.
+    # Build it against pre-C++17.
+    cat >> "$SPEC_DEST/config/clean-gcc.cfg" <<'CFG'
+
+520.omnetpp_r:  #lang='CXX'
+   CXXPORTABILITY = -std=gnu++14
+CFG
+
+    cd "$SPEC_DEST"
+    source ./shrc
+    echo "[spec] building: $SPEC_BENCHMARKS"
+    runcpu --config=clean-gcc --action=build $SPEC_BENCHMARKS
+    echo "[spec] staging refrate run dirs: $SPEC_BENCHMARKS"
+    runcpu --config=clean-gcc --action=setup --size=ref $SPEC_BENCHMARKS
+    echo "[spec] done. Run with: ./run.sh -b spec -w mcf -o results/spec_test"
+) fi
