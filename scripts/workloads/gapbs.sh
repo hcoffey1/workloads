@@ -14,7 +14,14 @@ config_gapbs(){
 }
 
 build_gapbs(){
-    (cd $CUR_PATH/gapbs && make -j$(nproc) && make bench-graphs -j 1)
+    local workload="${1:-}"
+    (cd $CUR_PATH/gapbs && make -j$(nproc))
+    # Only fetch/build the large real-graph datasets (twitter, ~3 GB download)
+    # when a *_twitter workload actually needs them.  Synthetic runs use a
+    # generated kron graph (-g <scale>) and need no external files.
+    case "$workload" in
+        *_twitter) (cd $CUR_PATH/gapbs && make bench-graphs -j 1) ;;
+    esac
 }
 
 # Resolve a workload name into "<kernel>|<input-args>".

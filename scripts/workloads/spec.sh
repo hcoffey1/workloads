@@ -124,7 +124,7 @@ run_spec(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$spec_exe" \
         "${SPEC_ARGS[$workload]}" "" "$spec_rundir"
 
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard "--cpunodebind=0 -p 0"
 }
 
 run_strace_spec(){

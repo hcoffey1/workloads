@@ -59,6 +59,7 @@ times.txt
 *.par
 *.bin
 *.csv
+ogb/dataset
 
 # Jupyter Notebook
 .ipynb_checkpoints
