@@ -79,14 +79,24 @@ export DRAMSIZE="$DRAMSIZE"
 export MIN_INTERPOSE_MEM_SIZE="$MIN_INTERPOSE_MEM_SIZE"
 EOF
 
-    # If REGENT_TARGET_EXE is set, propagate it so the LD_PRELOADed library
-    # only initialises in the named binary.  Without this, helper shells
-    # spawned by the workload via system()/popen() inherit LD_PRELOAD and
-    # each runs a duplicate arms_start_tiering(), corrupting the per-second
-    # CSV writers (multiple writers open regent_vis_*.csv in append mode and
-    # interleave their output).
-    if [[ -n "${REGENT_TARGET_EXE:-}" ]]; then
-        echo "export REGENT_TARGET_EXE=\"$REGENT_TARGET_EXE\"" >> "$wrapper_path"
+    # Restrict the tiering library to the workload binary itself.  Without a
+    # REGENT_TARGET_EXE filter, helper shells spawned by the workload via
+    # system()/popen() inherit LD_PRELOAD and each runs a duplicate
+    # arms_start_tiering(), corrupting the per-second CSV writers (multiple
+    # writers open regent_vis_*.csv in append mode and interleave their output).
+    #
+    # An explicit caller-set REGENT_TARGET_EXE wins.  Otherwise, when a tiering
+    # lib is preloaded (HEMEMPOL non-empty), derive the filter from the binary
+    # we are about to exec: its basename is exactly the argv[0] the hook matches
+    # (hook.cpp), verified across all suites.  This makes the binary chosen here
+    # the single source of truth for target_exe — there is no separate registry
+    # field to keep in sync.  No preload lib => no filter needed (left unset).
+    local _target_exe="${REGENT_TARGET_EXE:-}"
+    if [[ -z "$_target_exe" && -n "${HEMEMPOL:-}" ]]; then
+        _target_exe="$(basename "$binary_path")"
+    fi
+    if [[ -n "$_target_exe" ]]; then
+        echo "export REGENT_TARGET_EXE=\"$_target_exe\"" >> "$wrapper_path"
     fi
 
     # Add any extra environment variables if provided
