@@ -73,8 +73,8 @@ create_workload_wrapper() {
     #    pidfile_path="$(pwd)/$pidfile_path"
     #fi
 
-#export LD_PRELOAD="/users/hjcoffey/arms/Hoard/src/libhoard.so:$HEMEMPOL"
-#export LD_PRELOAD="/users/hjcoffey/arms/jemalloc/lib/libjemalloc.so:$HEMEMPOL"
+#export LD_PRELOAD="/users/hjcoffey/regent/Hoard/src/libhoard.so:$HEMEMPOL"
+#export LD_PRELOAD="/users/hjcoffey/regent/jemalloc/lib/libjemalloc.so:$HEMEMPOL"
     # Create wrapper script
     cat > "$wrapper_path" <<EOF
 #!/bin/sh
@@ -249,7 +249,7 @@ stop_mpstat() {
 # Depends on perf_monitor binary (built from perf_monitor.cpp via make)
 start_perf_monitor() {
     local interval_ms="${1:-1000}"
-    sudo "/users/hjcoffey/working/arms/perf_monitor" "$interval_ms" > "$PERFMON" &
+    sudo "/users/hjcoffey/working/regent/perf_monitor" "$interval_ms" > "$PERFMON" &
     sleep 1
 }
 
@@ -262,7 +262,7 @@ stop_perf_monitor() {
 # Depends on cpufreq_monitor binary (built from cpufreq_monitor.cpp via make)
 start_cpufreq() {
     local interval_ms="${1:-1000}"
-    "/users/hjcoffey/working/arms/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
+    "/users/hjcoffey/working/regent/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
     sleep 1
 }
 
