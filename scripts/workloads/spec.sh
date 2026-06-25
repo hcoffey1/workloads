@@ -21,6 +21,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 # Short workload name -> SPEC benchmark id
 declare -gA SPEC_ID=(
     [mcf]=505.mcf_r
+    [bwaves]=503.bwaves_r
     [lbm]=519.lbm_r
     [omnetpp]=520.omnetpp_r
     [xalancbmk]=523.xalancbmk_r
@@ -36,6 +37,7 @@ declare -gA SPEC_ID=(
 # Short workload name -> built executable base name (before _base.<LABEL>)
 declare -gA SPEC_EXE=(
     [mcf]=mcf_r
+    [bwaves]=bwaves_r
     [lbm]=lbm_r
     [omnetpp]=omnetpp_r
     [xalancbmk]=cpuxalan_r
@@ -48,10 +50,26 @@ declare -gA SPEC_EXE=(
     [imagick]=imagick_r
 )
 
+# Workloads that run as several independent, separately-tracked sub-invocations.
+# Value is a space-separated list of invocation labels; each label is both the
+# filename segment (spec_<label>_*) and a key into SPEC_ARGS for that sub-run.
+# 503.bwaves_r's refrate run is 4 invocations of the same binary over 4 grids
+# (driven by SPEC's `control` file); we track each as its own sub-run. See
+# docs/adr/0001-multi-invocation-workloads.md.
+declare -gA SPEC_SUBRUNS=(
+    [bwaves]="bwaves_1 bwaves_2 bwaves_3 bwaves_4"
+)
+
 # Short workload name -> refrate argument string (run from inside the run dir).
-# 'roms' reads its input from stdin, hence the embedded redirect.
+# 'roms' reads its input from stdin, hence the embedded redirect. Multi-
+# invocation workloads (SPEC_SUBRUNS) are keyed by invocation label instead of
+# by workload name; bwaves' four sub-runs each read their grid from stdin.
 declare -gA SPEC_ARGS=(
     [mcf]="inp.in"
+    [bwaves_1]="bwaves_1 < bwaves_1.in"
+    [bwaves_2]="bwaves_2 < bwaves_2.in"
+    [bwaves_3]="bwaves_3 < bwaves_3.in"
+    [bwaves_4]="bwaves_4 < bwaves_4.in"
     [lbm]="3000 reference.dat 0 0 100_100_130_ldc.of"
     [omnetpp]="-c General -r 0"
     [xalancbmk]="-v t5.xml xalanc.xsl"
@@ -111,18 +129,36 @@ build_spec(){
     echo "  rundir: $spec_rundir"
 }
 
+# Echo the sub-invocation labels for a SPEC workload (empty for single-
+# invocation benchmarks). run.sh's get_invocation_labels calls this to drive its
+# per-invocation attach/track/detach loop.
+invocations_spec(){
+    local workload="$1"
+    echo "${SPEC_SUBRUNS[$workload]:-}"
+}
+
 run_spec(){
     local workload="$1"
     resolve_spec_paths "$workload" || exit 1
 
+    # One staged rundir holds the binary + every sub-invocation's inputs.
+    # generate_workload_filenames picks up CURRENT_INVOCATION_LABEL (set by
+    # run.sh) automatically, so each sub-run gets its own output files.
     generate_workload_filenames "$workload"
 
-    echo "Running SPEC workload: $workload ($spec_id)"
+    # Multi-invocation workloads key their args by invocation label; everything
+    # else keys by workload name (unchanged for single-invocation SPEC).
+    local args="${SPEC_ARGS[$workload]:-}"
+    if [[ -n "${CURRENT_INVOCATION_LABEL:-}" && -n "${SPEC_ARGS[$CURRENT_INVOCATION_LABEL]+x}" ]]; then
+        args="${SPEC_ARGS[$CURRENT_INVOCATION_LABEL]}"
+    fi
+
+    echo "Running SPEC workload: $workload ($spec_id)${CURRENT_INVOCATION_LABEL:+ [$CURRENT_INVOCATION_LABEL]}"
 
     # Build a wrapper that cd's into the staged run dir before exec'ing the
     # binary so it finds its inputs and writes outputs locally.
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$spec_exe" \
-        "${SPEC_ARGS[$workload]}" "" "$spec_rundir"
+        "$args" "" "$spec_rundir"
 
     run_workload_standard "--cpunodebind=0 -p 0"
 }

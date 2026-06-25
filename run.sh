@@ -106,9 +106,18 @@ EOF
 # SYSTEM MANAGEMENT FUNCTIONS
 # ==============================================================================
 
+# Echo the filename segment for the active sub-invocation ("" for single-
+# invocation workloads), mirroring generate_workload_filenames so per-instrument
+# capture files line up with the per-workload output files.
+invocation_label_seg() {
+    if [[ -n "${CURRENT_INVOCATION_LABEL:-}" ]]; then
+        echo "_${CURRENT_INVOCATION_LABEL}"
+    fi
+}
+
 start_numastat() {
     local monitor_pid="$1"
-    local outfile="${OUTPUT_DIR}/numastat_iter${CURRENT_ITERATION}.txt"
+    local outfile="${OUTPUT_DIR}/numastat$(invocation_label_seg)_iter${CURRENT_ITERATION}.txt"
     echo "Starting numastat logging to $outfile"
     (
         while true; do
@@ -260,7 +269,7 @@ stop_damo() {
 
 # Generate DAMON output filename based on parameters
 generate_damo_filename() {
-    local base="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${SAMPLING_RATE}_${AGG_RATE}"
+    local base="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}$(invocation_label_seg)_${SAMPLING_RATE}_${AGG_RATE}"
 
     if [[ -n "$MIN_NUM_DAMO" && -n "$MAX_NUM_DAMO" ]]; then
         base+="_${MIN_NUM_DAMO}r_${MAX_NUM_DAMO}r"
@@ -281,6 +290,15 @@ generate_damo_filename() {
 # ==============================================================================
 # PEBS FUNCTIONS
 # ==============================================================================
+
+# Build the PEBS samples output path for the active (sub-)invocation.
+generate_pebs_filename() {
+    local base="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}$(invocation_label_seg)_${SAMPLING_RATE}"
+    if [[ -n "$CURRENT_ITERATION" ]]; then
+        base+="_iter${CURRENT_ITERATION}"
+    fi
+    echo "${base}_samples.dat"
+}
 
 start_pebs() {
     local output_file="$1" sampling_period="$2"
@@ -347,6 +365,30 @@ run_workload() {
     run_${SUITE} "${WORKLOAD}"
 }
 
+# Hook accessor: a suite may declare that a workload runs as several independent,
+# separately-tracked sub-invocations by defining invocations_<suite>(workload),
+# which echoes space/newline-separated invocation labels. Suites/workloads that
+# declare nothing yield an empty result => a single unlabeled run (full
+# back-compat). See docs/adr/0001-multi-invocation-workloads.md.
+#
+# INVOCATION_LIMIT (optional): restrict to the first N sub-invocations. 0/empty =
+# all (default). Characterization runs (run_characterization.sh) set
+# INVOCATION_LIMIT=1 so a multi-invocation workload is profiled as a single
+# representative sub-run: the per-PID artifacts (profiledump/birch/regent_vis/
+# regent_hot_profiles) stay mutually consistent instead of going last-run-wins,
+# and memory-twin sub-solves (e.g. bwaves_1..4) carry the same footprint/character
+# so one is representative. The standalone harness still runs every sub-run.
+get_invocation_labels() {
+    local labels=""
+    if declare -f "invocations_${SUITE}" > /dev/null; then
+        labels="$("invocations_${SUITE}" "${WORKLOAD}")"
+    fi
+    if [[ -n "${INVOCATION_LIMIT:-}" && "${INVOCATION_LIMIT}" != "0" && -n "$labels" ]]; then
+        labels="$(echo "$labels" | tr ' \t' '\n\n' | grep -v '^$' | head -n "$INVOCATION_LIMIT" | tr '\n' ' ')"
+    fi
+    echo "$labels"
+}
+
 wait_for_workload() {
     echo "Waiting for workload to complete (PID: $workload_pid)..."
     tail --pid=$workload_pid -f /dev/null
@@ -361,59 +403,113 @@ cleanup_workload() {
 # INSTRUMENTATION ORCHESTRATION
 # ==============================================================================
 
-run_with_pebs() {
-    sys_init
+# Per-invocation core: launch the workload once, attach the selected instrument
+# and numastat to its PID, wait for it to finish, then detach everything. Reads
+# CURRENT_INVOCATION_LABEL (set by run_instrumented) so every capture file is
+# labelled for the active sub-invocation. sys_init/sys_cleanup are the caller's
+# responsibility (done once per workload, not per invocation).
+run_tracked_invocation() {
+    case "$INSTRUMENT" in
+        "pebs")
+            local pebs_output
+            pebs_output=$(generate_pebs_filename)
+            start_pebs "$pebs_output" "$SAMPLING_RATE"
 
-    local pebs_output="${OUTPUT_DIR}/${SUITE}_${WORKLOAD}_${SAMPLING_RATE}"
-    if [[ -n "$CURRENT_ITERATION" ]]; then
-        pebs_output+="_iter${CURRENT_ITERATION}"
-    fi
-    pebs_output+="_samples.dat"
+            run_workload
+            start_numastat "$workload_pid"
+            wait_for_workload
 
-    start_pebs "$pebs_output" "$SAMPLING_RATE"
+            stop_pebs
+            stop_numastat
+            ;;
+        "damon")
+            local damo_file
+            damo_file=$(generate_damo_filename)
 
-    run_workload
-    start_numastat "$workload_pid"
-    wait_for_workload
+            run_workload
+            start_numastat "$workload_pid"
 
-    stop_pebs
-    sys_cleanup
+            # Set up region parameters
+            if [[ -n "$MIN_NUM_DAMO" || -n "$MAX_NUM_DAMO" ]]; then
+                [[ -z "$MAX_NUM_DAMO" ]] && MAX_NUM_DAMO="$MIN_NUM_DAMO"
+                [[ -z "$MIN_NUM_DAMO" ]] && MIN_NUM_DAMO="$MAX_NUM_DAMO"
+            fi
+
+            # Start appropriate DAMON mode
+            if [[ -n "$DAMON_AUTO_AGGRS" ]]; then
+                start_damo_autotune "$damo_file" "$workload_pid" "$SAMPLING_RATE" "$AGG_RATE" "$MIN_NUM_DAMO" "$MAX_NUM_DAMO"
+            else
+                start_damo "$damo_file" "$workload_pid" "$SAMPLING_RATE" "$AGG_RATE" "$MIN_NUM_DAMO" "$MAX_NUM_DAMO"
+            fi
+
+            wait_for_workload
+            stop_damo "$damo_file"
+            stop_numastat
+            ;;
+        ""|"none")
+            run_workload
+            start_numastat "$workload_pid"
+            wait_for_workload
+            stop_numastat
+            ;;
+        *)
+            echo "ERROR: Unknown instrumentation option '$INSTRUMENT'"
+            echo "Valid options: 'pebs', 'damon', or leave empty for none"
+            exit 1
+            ;;
+    esac
 }
 
-run_with_damon() {
+# Driver: one sys_init/sys_cleanup spanning the whole workload, with one tracked
+# invocation per declared label (or a single unlabelled invocation when none are
+# declared). Each label gets its own instrument/numastat capture cycle.
+run_instrumented() {
     sys_init
 
-    local damo_file
-    damo_file=$(generate_damo_filename)
-
-    run_workload
-    start_numastat "$workload_pid"
-
-    # Set up region parameters
-    if [[ -n "$MIN_NUM_DAMO" || -n "$MAX_NUM_DAMO" ]]; then
-        [[ -z "$MAX_NUM_DAMO" ]] && MAX_NUM_DAMO="$MIN_NUM_DAMO"
-        [[ -z "$MIN_NUM_DAMO" ]] && MIN_NUM_DAMO="$MAX_NUM_DAMO"
+    local labels
+    labels=$(get_invocation_labels)
+    # No declared labels => a single unlabelled run.
+    if [[ -z "${labels// /}" ]]; then
+        labels=""
     fi
 
-    # Start appropriate DAMON mode
-    if [[ -n "$DAMON_AUTO_AGGRS" ]]; then
-        start_damo_autotune "$damo_file" "$workload_pid" "$SAMPLING_RATE" "$AGG_RATE" "$MIN_NUM_DAMO" "$MAX_NUM_DAMO"
+    if [[ -z "$labels" ]]; then
+        run_tracked_invocation
     else
-        start_damo "$damo_file" "$workload_pid" "$SAMPLING_RATE" "$AGG_RATE" "$MIN_NUM_DAMO" "$MAX_NUM_DAMO"
+        # Per-sub-run isolation: when a caller drives the arms vis/profile
+        # machinery (REGENT_VIS_DIR set, e.g. run_characterization.sh), its
+        # fixed-name artifacts (regent_vis_*.csv, regent_hot_profiles.csv) are
+        # truncated at each process start and would otherwise go last-run-wins.
+        # Give each sub-invocation its own <OUTPUT_DIR>/<label>/ so every per-run
+        # artifact set (stdout/time/numastat + profiledump/birch + regent_vis/
+        # hot_profiles + birch_model) stays complete and mutually consistent.
+        # Without REGENT_VIS_DIR (plain runs) the flat per-label filenames already
+        # don't collide, so the layout is unchanged. See
+        # docs/adr/0001-multi-invocation-workloads.md.
+        local _isolate=0
+        [[ -n "${REGENT_VIS_DIR:-}" ]] && _isolate=1
+        local _out_base="$OUTPUT_DIR"
+        local _vis_base="${REGENT_VIS_DIR:-}"
+        local _birch_base="${BIRCH_OUTPUT:-}"
+        local label
+        for label in $labels; do
+            echo "--- Sub-invocation: $label ---"
+            export CURRENT_INVOCATION_LABEL="$label"
+            if [[ "$_isolate" -eq 1 ]]; then
+                export OUTPUT_DIR="${_out_base}/${label}"
+                mkdir -p "$OUTPUT_DIR"
+                export REGENT_VIS_DIR="$OUTPUT_DIR"
+                [[ -n "$_birch_base" ]] && export BIRCH_OUTPUT="${OUTPUT_DIR}/$(basename "$_birch_base")"
+            fi
+            run_tracked_invocation
+            unset CURRENT_INVOCATION_LABEL
+        done
+        if [[ "$_isolate" -eq 1 ]]; then
+            export OUTPUT_DIR="$_out_base"
+            export REGENT_VIS_DIR="$_vis_base"
+            [[ -n "$_birch_base" ]] && export BIRCH_OUTPUT="$_birch_base"
+        fi
     fi
-
-    wait_for_workload
-    stop_damo "$damo_file"
-
-    sys_cleanup
-}
-
-run_without_instrumentation() {
-    sys_init
-
-    run_workload
-    start_numastat "$workload_pid"
-    wait_for_workload
 
     sys_cleanup
 }
@@ -527,15 +623,15 @@ main() {
         case "$INSTRUMENT" in
             "pebs")
                 echo "=== Running with PEBS instrumentation ==="
-                run_with_pebs
+                run_instrumented
                 ;;
             "damon")
                 echo "=== Running with DAMON instrumentation ==="
-                run_with_damon
+                run_instrumented
                 ;;
             ""|"none")
                 echo "=== Running without instrumentation ==="
-                run_without_instrumentation
+                run_instrumented
                 ;;
             *)
                 echo "ERROR: Unknown instrumentation option '$INSTRUMENT'"

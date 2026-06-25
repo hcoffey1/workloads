@@ -59,8 +59,9 @@ Source install inspected: `/proj/instrument-PG0/spec/` (SPEC CPU2017, config `hc
 | 4 | Benchmark set | **Curated memory-intensive subset.** |
 | 5 | Input size | **ref** (refrate). Run dirs staged via `runcpu --action=setup`. |
 | 6 | Launch model | **Direct binary from staged run dir.** `cd` into run dir, exec binary directly so one PID is tracked under `numactl`/`time`. Not via `runcpu --action=run`. |
-| 7 | Multi-command benchmarks | **Excluded** — only single-invocation benchmarks in the subset (clean per-PID instrumentation for every workload). Multi-invocation ones documented below for a later decision. |
+| 7 | Multi-command benchmarks | **Supported via a generic multi-invocation mechanism** (since `bwaves`). A workload declares its sub-invocations (`invocations_<suite>`); `run.sh` loops attach→track→detach once per sub-invocation, each fully and independently tracked (separate numastat/DAMON/PEBS captures + output files). Workloads that declare nothing run exactly once, unlabelled — byte-for-byte identical to before. See decision 9 and `docs/adr/0001-multi-invocation-workloads.md`. |
 | 8 | setup.sh | **Automate** copy + clean build + ref run-dir staging in a `build_spec` step. |
+| 9 | Multi-invocation instrumentation granularity | **Per-invocation capture cycle** (one numastat/DAMON/PEBS start+stop per sub-run) rather than one capture spanning all sub-runs. Gives clean per-solve alignment; `sys_init`/`sys_cleanup` (cache drop, RSS settling) still run once per workload to preserve timing semantics. `bwaves` is the first user: 4 sub-runs → `spec_bwaves_1`..`spec_bwaves_4`. |
 
 ### Why single-invocation only (instrumentation constraint)
 
@@ -71,14 +72,17 @@ Source install inspected: `/proj/instrument-PG0/spec/` (SPEC CPU2017, config `hc
   benchmarks lets the existing `exec`-the-binary model give every workload a stable,
   meaningful tracked PID.
 
-## Proposed `-w` subset (single-invocation, ref, memory-intensive)
+## `-w` subset (ref, memory-intensive)
 
-All are a single binary invocation at refrate, so the wrapper can `cd` into the run dir
-and `exec` the binary (DAMON/PEBS/numastat all attach cleanly).
+All single-invocation ones are a single binary invocation at refrate, so the wrapper can
+`cd` into the run dir and `exec` the binary (DAMON/PEBS/numastat all attach cleanly).
+`bwaves` is **multi-invocation** (4 sub-runs); the harness loops the attach/track/detach
+cycle once per sub-run (decision 9), each with its own tracked PID.
 
 | `-w` name | SPEC id | lang | character |
 |-----------|---------|------|-----------|
 | `mcf`       | 505.mcf_r       | C   | pointer-chasing, irregular, cache-unfriendly |
+| `bwaves`    | 503.bwaves_r    | Fortran | blast-wave CFD, **4 sub-runs**, very high streaming bandwidth |
 | `lbm`       | 519.lbm_r       | C   | streaming lattice-Boltzmann, very high bandwidth |
 | `omnetpp`   | 520.omnetpp_r   | C++ | discrete-event sim, large irregular footprint |
 | `xalancbmk` | 523.xalancbmk_r | C++ | XML→XSLT, large heap, pointer-heavy |
@@ -92,8 +96,9 @@ sources do not compile with gcc 11 (ambiguous template specialization of
 `-fpermissive`). It remains in `spec.sh`'s tables, so if it is ever ported/built it
 will run; it is just not in the default `setup.sh` build list.
 
-Optional smaller/compute-bound but already-built C/C++ ones (lower memory intensity):
-`deepsjeng` (531), `leela` (541), `imagick` (538).
+Optional smaller/compute-bound C/C++ ones (lower memory intensity): `deepsjeng` (531) —
+now in the default `setup.sh` build set; `leela` (541), `imagick` (538) — in `spec.sh`'s
+tables but not built by default.
 
 Reference invocation forms (from `Spec/object.pm`; args shown for refrate):
 - `mcf_r inp.in`
@@ -105,12 +110,20 @@ Reference invocation forms (from `Spec/object.pm`; args shown for refrate):
 - `fotonik3d_r` (reads files in run dir)
 - `roms_r < ocean_benchmark2.in.x`  ← stdin redirect; embed `< file` in the wrapper exec line
 
-## Excluded multi-invocation benchmarks (write-up for later)
+## Multi-invocation benchmarks
 
-These run **several binary invocations** per ref run. They are excluded from the subset
-for now because DAMON/numastat can't follow across the exec boundaries cleanly. If we
-later accept the "run preludes as children, exec the dominant command last" model (PEBS
-still captures all), they could be added.
+These run **several binary invocations** per ref run. The generic multi-invocation
+mechanism (decision 7/9) now supports this class: a workload declares its sub-invocations
+and each is tracked independently. `503.bwaves_r` is integrated (see the subset table
+above). The rest below are **not yet integrated** — they remain candidates; each just
+needs a `SPEC_SUBRUNS` entry plus per-label `SPEC_ARGS`.
+
+### 503.bwaves_r — 4 invocations (**integrated**)
+Blast-wave CFD (Fortran). Same binary run **4 times** over 4 grids
+(`bwaves_1`..`bwaves_4`), each `bwaves_r bwaves_N < bwaves_N.in`, driven by SPEC's
+`control` file. Each invocation is an independent, long, high-bandwidth solve; all four
+are memory-twins (~250k-cell grids) differing only in aspect ratio and timestep count.
+Run as four independently-tracked sub-runs (`spec_bwaves_1`..`spec_bwaves_4`).
 
 ### 500.perlbench_r — 3 invocations
 Perl interpreter benchmark; each invocation runs a different Perl workload script:
@@ -125,12 +138,6 @@ with different optimization/inline-limit flags, e.g.
 `gcc-pp.c -O3 -finline-limit=0`, `gcc-pp.c -O2 -finline-limit=…`, `ref32.c -O5`,
 `ref32.c -O3 -fselective-scheduling …`, `gcc-smaller.c -O3 …`, etc.
 Memory: large, irregular working set (compiler IR/graphs); a classic memory-intensive int benchmark.
-
-### 503.bwaves_r — 4 invocations
-Blast-wave CFD (Fortran). Same binary run **4 times** over 4 input directories
-(`bwaves_1`..`bwaves_4`), each `bwaves_r <dirname>`. Each invocation is an independent,
-long, high-bandwidth solve. Memory: high streaming bandwidth — would be a strong
-memory-intensive candidate if multi-invocation is later supported.
 
 ### 525.x264_r — 3 invocations
 H.264 video encoder:

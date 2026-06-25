@@ -117,10 +117,12 @@ elif [[ ! -d "$SPEC_SRC" ]]; then
 else (
     echo "[spec] installing build toolchain (gcc/g++/gfortran/rsync)"
     sudo apt install -y gcc g++ gfortran rsync
-    # Single-invocation, memory-intensive subset that builds cleanly with system
-    # gcc 11 (see docs/spec2017_integration.md). 510.parest_r is intentionally
+    # Memory-intensive subset that builds cleanly with system gcc/gfortran 11
+    # (see docs/spec2017_integration.md). 503.bwaves_r is multi-invocation
+    # (4 sub-runs, tracked independently — see the multi-invocation mechanism in
+    # run.sh); the rest are single-invocation. 510.parest_r is intentionally
     # excluded: its deal.II sources don't compile with gcc 11.
-    SPEC_BENCHMARKS="${SPEC_BENCHMARKS:-505.mcf_r 519.lbm_r 520.omnetpp_r 523.xalancbmk_r 507.cactuBSSN_r 549.fotonik3d_r 554.roms_r}"
+    SPEC_BENCHMARKS="${SPEC_BENCHMARKS:-505.mcf_r 503.bwaves_r 519.lbm_r 520.omnetpp_r 523.xalancbmk_r 507.cactuBSSN_r 549.fotonik3d_r 554.roms_r 531.deepsjeng_r}"
 
     echo "[spec] copying $SPEC_SRC -> $SPEC_DEST"
     mkdir -p "$SPEC_DEST"

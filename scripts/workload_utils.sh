@@ -11,8 +11,16 @@ generate_workload_filenames() {
     local workload_name="$1"
     local suite_name="${SUITE:-$workload_name}"
 
+    # Multi-invocation workloads (see run.sh:get_invocation_labels) set
+    # CURRENT_INVOCATION_LABEL so each sub-invocation gets its own output files.
+    # Empty label => names are byte-for-byte identical to single-invocation runs.
+    local label_seg=""
+    if [[ -n "${CURRENT_INVOCATION_LABEL:-}" ]]; then
+        label_seg="_${CURRENT_INVOCATION_LABEL}"
+    fi
+
     # Generate base filename with iteration
-    local base_filename="${OUTPUT_DIR}/${suite_name}_${workload_name}_${hemem_policy}_${DRAMSIZE}"
+    local base_filename="${OUTPUT_DIR}/${suite_name}_${workload_name}${label_seg}_${hemem_policy}_${DRAMSIZE}"
     if [[ -n "$CURRENT_ITERATION" ]]; then
         base_filename+="_iter${CURRENT_ITERATION}"
     fi
@@ -26,7 +34,7 @@ generate_workload_filenames() {
     export PERFMON="${base_filename}_perfmon.txt"
     export CPUFREQ="${base_filename}_cpufreq.txt"
     export PIDFILE="${base_filename}.pid"
-    export WRAPPER="${OUTPUT_DIR}/run_${suite_name}_${workload_name}_iter${CURRENT_ITERATION:-0}.sh"
+    export WRAPPER="${OUTPUT_DIR}/run_${suite_name}_${workload_name}${label_seg}_iter${CURRENT_ITERATION:-0}.sh"
     # Prefix used by the arms metric_log writer to split parser-consumed tags
     # into per-tag sibling files (profiledump.txt / bwdump.txt /
     # phasechange.txt / birch.txt). plot_profiles.py discovers them by
