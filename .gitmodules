@@ -6,7 +6,7 @@
 	url = https://github.com/sbeamer/gapbs.git
 [submodule "graph500"]
 	path = graph500
-	url = https://github.com/graph500/graph500.git
+	url = https://github.com/hcoffey1/graph500.git
 [submodule "XSBench"]
 	path = XSBench
 	url = https://github.com/ANL-CESAR/XSBench.git
@@ -45,7 +45,7 @@
 	url = https://github.com/UK-MAC/CloverLeaf.git
 [submodule "NPB-CPP"]
 	path = NPB-CPP
-	url = https://github.com/GMAP/NPB-CPP.git
+	url = https://github.com/hcoffey1/NPB-CPP.git
 [submodule "minimap2"]
 	path = minimap2
 	url = https://github.com/lh3/minimap2.git
