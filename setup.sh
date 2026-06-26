@@ -1,128 +1,241 @@
 #!/bin/bash
-
-git submodule init
-git submodule update
-
-sudo apt update
-#intel-mkl needed for Faiss as its BLAS library.
-sudo apt install libnuma-dev libpmem-dev libaio-dev libssl-dev mpich intel-mkl -y
-
-# For renaissance Java benchmarks
-sudo apt-get install openjdk-21-jdk -y
-
-conda tos accept
-conda create -n dataVis pandas matplotlib seaborn -y
-
-pushd scripts/cipp-workspace/tools
-make clean
-make ARCH=haswell -j 20
-popd
-
-# PEBS
-cd scripts/PEBS_page_tracking/
-git apply ../../patches/pebs.patch
-make -j20
-cd ../..
-
-# flexkvs
-cd flexkvs
-git apply ../patches/flexkvs.patch
-make -j20
-cd ..
-
-# GAPBS
-cd gapbs
-git apply ../patches/gapbs.patch
-#make bench-graphs -j2
-make -j20
-cd ..
-
-# graph_500
-cd graph500
-#git apply ../patches/graph500.patch
-git checkout master
-#cd src
-make -j20
-cd ..
-
-# liblinear
-cd liblinear-2.47
-wget https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/kdd12.xz
-unxz kdd12.xz
-rm kdd12.xz
-make -j20
-cd ..
-
-# MERCI
-cd MERCI
-git apply ../patches/merci.patch
-mkdir -p data/4_filtered/amazon_All
-cd data/4_filtered/amazon_All
-wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/4_filtered/amazon_All/amazon_All_test_filtered.txt
-wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/4_filtered/amazon_All/amazon_All_train_filtered.txt
-cd ../../..
-mkdir -p data/5_patoh/amazon_All/partition_2748/
-cd data/5_patoh/amazon_All/partition_2748/
-wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/5_patoh/amazon_All/partition_2748/amazon_All_train_filtered.txt.part.2748
-cd ../../../..
-# now in merci
-cd 4_performance_evaluation/
-mkdir bin
-make -j20
-cd ../..
-# now in workloads
-
-# silo
-cd silo/silo
-pushd third-party/lz4
-make library
-popd
-git apply ../../patches/silo.patch
-make dbtest -j20
-cd ../..
-
-# XSBench
-cd XSBench/openmp-threading
-make -j20
-cd ../..
-
 #
-pushd ./NPB-CPP/libs/tbb-2020.1/
-# Build tbb library and make env source file executable.
-make -j 32
-chmod +x ./build/linux_intel64_gcc_cc11.4.0_libc2.35_kernel5.1.0_release/tbbvars.sh
-popd
+# setup.sh - build all workloads in this suite.
+#
+# Prerequisites (submodules, system packages, conda env) are installed serially
+# first, then each workload is built as a concurrent background job. Per-job
+# status and timing are collected and written to setup_summary.log.
+#
+# Tunables (env overrides):
+#   MAX_PARALLEL  max number of build jobs to run at once   (default 4)
+#   J             -j parallelism passed to each make        (default 4)
+#   LOGDIR        directory for per-job logs/status         (default ./setup_logs)
+#   BUILD_SPEC=0  skip the (heavy) SPEC CPU2017 build
+#   SPEC_SRC      path to a SPEC CPU2017 install            (default /proj/instrument-PG0/spec)
 
-pushd ./minimap2
-git submodule update --init --recursive
-popd
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT" || exit 1
 
-# For solo-ann
-sudo apt update && sudo apt install -y python3.10-venv python3.10-dev
+MAX_PARALLEL="${MAX_PARALLEL:-8}"
+J="${J:-16}"
+LOGDIR="${LOGDIR:-$ROOT/setup_logs}"
+SUMMARY="${SUMMARY:-$ROOT/setup_summary.log}"
 
-# ==============================================================================
-# SPEC CPU2017 (built when the source tree is available; auto-skipped otherwise)
-# ==============================================================================
-# Copies a SPEC install locally, writes a clean (non-XRay) -O3 gcc config, then
-# builds and stages refrate run dirs for the memory-intensive subset used by
-# scripts/workloads/spec.sh.  Heavy (~9GB copy + compile).  Runs by default when
-# the source tree is present; auto-skips otherwise.  Force-skip with BUILD_SPEC=0.
-SPEC_SRC="${SPEC_SRC:-/proj/instrument-PG0/spec}"
-SPEC_DEST="${SPEC_DEST:-$HOME/spec}"
-if [[ "${BUILD_SPEC:-1}" == "0" ]]; then
-    echo "[spec] BUILD_SPEC=0; skipping SPEC build."
-elif [[ ! -d "$SPEC_SRC" ]]; then
-    echo "[spec] SPEC source not found at $SPEC_SRC; skipping SPEC build."
-    echo "[spec] To enable, set SPEC_SRC=/path/to/spec (a SPEC CPU2017 install) and re-run."
-else (
+mkdir -p "$LOGDIR"
+rm -f "$LOGDIR"/*.status   # clear stale results from a previous run
+
+declare -a JOB_NAMES=()
+
+# ----------------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------------
+
+fmt_time() { printf '%dm%02ds' $(( $1 / 60 )) $(( $1 % 60 )); }
+
+# apply_patch <patchfile> - idempotently apply a git patch from the cwd.
+# Skips if the patch is already applied so re-running setup.sh is safe.
+apply_patch() {
+    local p="$1"
+    if git apply --reverse --check "$p" 2>/dev/null; then
+        echo "patch already applied: $p"
+    elif git apply --check "$p" 2>/dev/null; then
+        git apply "$p" && echo "applied patch: $p"
+    else
+        echo "WARNING: patch $p does not apply cleanly; attempting anyway" >&2
+        git apply "$p"
+    fi
+}
+
+# _exec_job <name> <cmd...> - run a build, capturing log, exit code and elapsed
+# time. Each build runs under `set -e` so the first failing command propagates.
+# Exit code 100 from a build is treated as a deliberate SKIP.
+_exec_job() {
+    local name="$1"; shift
+    local log="$LOGDIR/${name}.log"
+    local status="$LOGDIR/${name}.status"
+    local start end rc
+    start=$(date +%s)
+    # NB: run the subshell as a *standalone* command, not as an `if` condition.
+    # Bash ignores `set -e` for a command used as an if/while/&&/|| condition
+    # (even an explicit `set -e` inside it), which would silently mask failures.
+    ( set -e; "$@" ) >"$log" 2>&1
+    rc=$?
+    end=$(date +%s)
+    printf '%s|%s|%s\n' "$name" "$rc" "$((end - start))" >"$status"
+    return "$rc"
+}
+
+# throttle - block until fewer than MAX_PARALLEL background jobs are running.
+throttle() {
+    while (( $(jobs -rp | wc -l) >= MAX_PARALLEL )); do
+        wait -n 2>/dev/null || true
+    done
+}
+
+# run_job <name> <cmd...> - launch a build concurrently, respecting MAX_PARALLEL.
+run_job() {
+    local name="$1"
+    JOB_NAMES+=("$name")
+    throttle
+    echo ">> launching: $name (log: $LOGDIR/${name}.log)"
+    _exec_job "$@" &
+}
+
+# ----------------------------------------------------------------------------
+# Prerequisites (serial - the parallel builds depend on these)
+# ----------------------------------------------------------------------------
+
+prereqs() {
+    git submodule init
+    git submodule update
+
+    sudo apt-get update
+    # intel-mkl (Faiss BLAS backend) prompts a license UI that breaks headless
+    # installs; force noninteractive + keep existing config files. openjdk is for
+    # the renaissance Java benchmarks, python3.10-venv/-dev for ANN-SoLo.
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        libnuma-dev libpmem-dev libaio-dev libssl-dev mpich intel-mkl \
+        openjdk-21-jdk python3.10-venv python3.10-dev htop \
+        autoconf automake libtool \
+        libdb-dev libdb++-dev   # Silo (autotools + Berkeley DB db_cxx.h)
+
+    # Miniconda (headless) + dataVis env for plotting/analysis. -b is batch
+    # (no prompts), -u updates an existing install, so this is safe to re-run.
+    local conda_home="$HOME/miniconda3"
+    local conda="$conda_home/bin/conda"
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-py312_26.3.2-2-Linux-x86_64.sh -O "$HOME/miniconda.sh"
+    bash "$HOME/miniconda.sh" -b -u -p "$conda_home"
+    rm -f "$HOME/miniconda.sh"
+    "$conda" init zsh bash
+    # Recent conda gates Anaconda's default channels behind a Terms-of-Service
+    # prompt that blocks headless installs; accept it non-interactively.
+    "$conda" tos accept --override-channels \
+        --channel https://repo.anaconda.com/pkgs/main \
+        --channel https://repo.anaconda.com/pkgs/r
+    "$conda" create -n dataVis pyarrow pandas matplotlib seaborn notebook scikit-learn -y
+}
+
+# ----------------------------------------------------------------------------
+# Per-workload build functions
+# ----------------------------------------------------------------------------
+
+build_cipp() {
+    cd "$ROOT/scripts/cipp-workspace/tools"
+    make clean
+    make ARCH=haswell -j"$J"
+}
+
+build_pebs() {
+    cd "$ROOT/scripts/PEBS_page_tracking"
+    git checkout -- pebs.cpp 2>/dev/null || true   # drop leftover edits from prior runs
+    apply_patch ../../patches/pebs.patch
+    make -j"$J"
+}
+
+build_flexkvs() {
+    cd "$ROOT/flexkvs"
+    apply_patch ../patches/flexkvs.patch
+    make -j"$J"
+}
+
+build_gapbs() {
+    cd "$ROOT/gapbs"
+    apply_patch ../patches/gapbs.patch
+    make bench-graphs -j2
+    make -j"$J"
+}
+
+build_graph500() {
+    cd "$ROOT/graph500"
+    git checkout master
+    cp make-incs/make.inc-gcc make.inc
+    #Change makefile gcc version and enable openmp
+    sed -i -e 's/^CC = gcc-4.6/CC = gcc/' \
+        -e 's/^# \(BUILD_OPENMP = Yes\)/\1/' \
+        -e 's/^# \(CFLAGS_OPENMP = -fopenmp\)/\1/' make.inc
+    make -j"$J"
+}
+
+build_liblinear() {
+    cd "$ROOT/liblinear-2.47"
+    if [[ ! -f kdd12 ]]; then
+        wget https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/kdd12.xz
+        unxz kdd12.xz   # removes the .xz on success
+    fi
+    make -j"$J"
+}
+
+build_merci() {
+    cd "$ROOT/MERCI"
+    apply_patch ../patches/merci.patch
+
+    local base="https://pages.cs.wisc.edu/~apoduval/MERCI/data"
+    mkdir -p data/4_filtered/amazon_All
+    wget -nc -P data/4_filtered/amazon_All \
+        "$base/4_filtered/amazon_All/amazon_All_test_filtered.txt" \
+        "$base/4_filtered/amazon_All/amazon_All_train_filtered.txt"
+
+    mkdir -p data/5_patoh/amazon_All/partition_2748/
+    wget -nc -P data/5_patoh/amazon_All/partition_2748/ \
+        "$base/5_patoh/amazon_All/partition_2748/amazon_All_train_filtered.txt.part.2748"
+
+    cd 4_performance_evaluation
+    mkdir -p bin
+    make -j"$J"
+}
+
+build_silo() {
+    cd "$ROOT/silo/silo"
+    ( cd third-party/lz4 && make library )
+    apply_patch ../../patches/silo.patch
+    make dbtest -j"$J"
+}
+
+build_xsbench() {
+    cd "$ROOT/XSBench/openmp-threading"
+    make -j"$J"
+}
+
+build_npb() {
+    cd "$ROOT/NPB-CPP/libs/tbb-2020.1"
+    make -j"$J"
+    # Make the env-source helper executable (build dir name encodes toolchain).
+    chmod +x ./build/*/tbbvars.sh
+}
+
+build_minimap2() {
+    cd "$ROOT/minimap2"
+    git submodule update --init --recursive
+}
+
+# SPEC CPU2017: copies a SPEC install locally, writes a clean (non-XRay) -O3 gcc
+# config, then builds and stages refrate run dirs for the memory-intensive
+# subset used by scripts/workloads/spec.sh. Heavy (~9GB copy + compile). Returns
+# 100 (SKIPPED) when disabled or when the source tree is absent.
+build_spec() {
+    local SPEC_SRC="${SPEC_SRC:-/proj/instrument-PG0/spec}"
+    local SPEC_DEST="${SPEC_DEST:-$HOME/spec}"
+
+    if [[ "${BUILD_SPEC:-1}" == "0" ]]; then
+        echo "[spec] BUILD_SPEC=0; skipping SPEC build."
+        return 100
+    fi
+    if [[ ! -d "$SPEC_SRC" ]]; then
+        echo "[spec] SPEC source not found at $SPEC_SRC; skipping SPEC build."
+        echo "[spec] To enable, set SPEC_SRC=/path/to/spec and re-run."
+        return 100
+    fi
+
     echo "[spec] installing build toolchain (gcc/g++/gfortran/rsync)"
-    sudo apt install -y gcc g++ gfortran rsync
+    sudo apt-get install -y gcc g++ gfortran rsync
+
     # Memory-intensive subset that builds cleanly with system gcc/gfortran 11
     # (see docs/spec2017_integration.md). 503.bwaves_r is multi-invocation
-    # (4 sub-runs, tracked independently — see the multi-invocation mechanism in
-    # run.sh); the rest are single-invocation. 510.parest_r is intentionally
+    # (4 sub-runs, tracked independently). 510.parest_r is intentionally
     # excluded: its deal.II sources don't compile with gcc 11.
-    SPEC_BENCHMARKS="${SPEC_BENCHMARKS:-505.mcf_r 503.bwaves_r 519.lbm_r 520.omnetpp_r 523.xalancbmk_r 507.cactuBSSN_r 549.fotonik3d_r 554.roms_r 531.deepsjeng_r}"
+    local SPEC_BENCHMARKS="${SPEC_BENCHMARKS:-505.mcf_r 503.bwaves_r 519.lbm_r 520.omnetpp_r 523.xalancbmk_r 507.cactuBSSN_r 549.fotonik3d_r 554.roms_r 531.deepsjeng_r}"
 
     echo "[spec] copying $SPEC_SRC -> $SPEC_DEST"
     mkdir -p "$SPEC_DEST"
@@ -154,6 +267,94 @@ CFG
     echo "[spec] building: $SPEC_BENCHMARKS"
     runcpu --config=clean-gcc --action=build $SPEC_BENCHMARKS
     echo "[spec] staging refrate run dirs: $SPEC_BENCHMARKS"
-    runcpu --config=clean-gcc --action=setup --size=ref $SPEC_BENCHMARKS
+    # --action=setup only stages run dirs (runs nothing), so runcpu's epilogue
+    # exits non-zero with "No output files were found to compare". That's cosmetic
+    # here; the run dirs are still staged, so don't let it fail the build.
+    runcpu --config=clean-gcc --action=setup --size=ref $SPEC_BENCHMARKS || true
     echo "[spec] done. Run with: ./run.sh -b spec -w mcf -o results/spec_test"
-) fi
+}
+
+# ----------------------------------------------------------------------------
+# Summary report
+# ----------------------------------------------------------------------------
+
+write_summary() {
+    {
+        echo "===================================================================="
+        echo " Setup Summary  -  $(date '+%F %T')"
+        echo " Per-job logs: $LOGDIR"
+        echo "===================================================================="
+        printf '%-14s %-9s %9s\n' "JOB" "STATUS" "TIME"
+        printf '%-14s %-9s %9s\n' "--------------" "---------" "---------"
+
+        local ok=0 fail=0 skip=0
+        local -a failed_names=()
+        for name in "${JOB_NAMES[@]}"; do
+            local sf="$LOGDIR/${name}.status"
+            if [[ ! -f "$sf" ]]; then
+                printf '%-14s %-9s %9s\n' "$name" "NORESULT" "-"
+                fail=$((fail + 1)); failed_names+=("$name"); continue
+            fi
+            local n rc secs
+            IFS='|' read -r n rc secs < "$sf"
+            local st
+            case "$rc" in
+                0)   st="OK";      ok=$((ok + 1)) ;;
+                100) st="SKIPPED"; skip=$((skip + 1)) ;;
+                *)   st="FAILED";  fail=$((fail + 1)); failed_names+=("$name (rc=$rc)") ;;
+            esac
+            printf '%-14s %-9s %9s\n' "$name" "$st" "$(fmt_time "$secs")"
+        done
+
+        echo "--------------------------------------------------------------------"
+        echo "Total: ${#JOB_NAMES[@]}   OK: $ok   FAILED: $fail   SKIPPED: $skip"
+        if (( fail > 0 )); then
+            echo "Failed: ${failed_names[*]}"
+            echo "Inspect logs in $LOGDIR/<job>.log"
+        fi
+    } | tee "$SUMMARY"
+}
+
+# ----------------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------------
+
+echo "setup.sh: MAX_PARALLEL=$MAX_PARALLEL  J=$J  LOGDIR=$LOGDIR"
+SETUP_START=$(date +%s)
+
+# Prerequisites run serially since the parallel builds depend on them.
+echo ">> prerequisites (submodules, apt packages, conda env)"
+JOB_NAMES+=("prereqs")
+_exec_job prereqs prereqs || echo "WARNING: prereqs reported errors; continuing with builds" >&2
+
+# Concurrent per-workload builds.
+run_job cipp       build_cipp
+run_job pebs       build_pebs
+run_job flexkvs    build_flexkvs
+run_job gapbs      build_gapbs
+run_job graph500   build_graph500
+run_job liblinear  build_liblinear
+run_job merci      build_merci
+run_job silo       build_silo
+run_job xsbench    build_xsbench
+run_job npb        build_npb
+run_job minimap2   build_minimap2
+run_job spec       build_spec
+
+# Wait for all background builds to finish.
+wait
+
+SETUP_END=$(date +%s)
+echo
+write_summary
+echo
+echo "Total setup time: $(fmt_time $((SETUP_END - SETUP_START)))"
+
+# Exit non-zero if any job failed (skips/oks are fine).
+for name in "${JOB_NAMES[@]}"; do
+    sf="$LOGDIR/${name}.status"
+    [[ -f "$sf" ]] || exit 1
+    IFS='|' read -r _ rc _ < "$sf"
+    [[ "$rc" == 0 || "$rc" == 100 ]] || exit 1
+done
+exit 0
