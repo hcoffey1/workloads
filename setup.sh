@@ -20,26 +20,22 @@ popd
 
 # PEBS
 cd scripts/PEBS_page_tracking/
-git apply ../../patches/pebs.patch
 make -j20
 cd ../..
 
 # flexkvs
 cd flexkvs
-git apply ../patches/flexkvs.patch
 make -j20
 cd ..
 
 # GAPBS
 cd gapbs
-git apply ../patches/gapbs.patch
 #make bench-graphs -j2
 make -j20
 cd ..
 
 # graph_500
 cd graph500
-#git apply ../patches/graph500.patch
 git checkout master
 #cd src
 make -j20
@@ -55,7 +51,6 @@ cd ..
 
 # MERCI
 cd MERCI
-git apply ../patches/merci.patch
 mkdir -p data/4_filtered/amazon_All
 cd data/4_filtered/amazon_All
 wget https://pages.cs.wisc.edu/~apoduval/MERCI/data/4_filtered/amazon_All/amazon_All_test_filtered.txt

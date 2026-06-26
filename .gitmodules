@@ -3,7 +3,7 @@
 	url = https://ajaustin@bitbucket.org/ajaustin/silo.git
 [submodule "gapbs"]
 	path = gapbs
-	url = https://github.com/sbeamer/gapbs.git
+	url = https://github.com/hcoffey1/gapbs.git
 [submodule "graph500"]
 	path = graph500
 	url = https://github.com/hcoffey1/graph500.git

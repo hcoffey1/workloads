@@ -67,7 +67,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 
 ### Patches
 
-`patches/` contains git patches that must be applied before building certain submodules: `flexkvs.patch`, `gapbs.patch`, `graph500.patch`, `merci.patch`, `pebs.patch`, `silo.patch`. `setup.sh` applies them automatically; apply individually with `git apply ../../patches/<name>.patch` from within the submodule directory.
+`patches/` contains the `silo.patch` git patch that must be applied before building the `silo` submodule. `setup.sh` applies it automatically; apply individually with `git apply ../../patches/silo.patch` from within the `silo/silo` directory.
 
 ## Workload Index
 
