@@ -129,20 +129,16 @@ build_cipp() {
 
 build_pebs() {
     cd "$ROOT/scripts/PEBS_page_tracking"
-    git checkout -- pebs.cpp 2>/dev/null || true   # drop leftover edits from prior runs
-    apply_patch ../../patches/pebs.patch
     make -j"$J"
 }
 
 build_flexkvs() {
     cd "$ROOT/flexkvs"
-    apply_patch ../patches/flexkvs.patch
     make -j"$J"
 }
 
 build_gapbs() {
     cd "$ROOT/gapbs"
-    apply_patch ../patches/gapbs.patch
     make bench-graphs -j2
     make -j"$J"
 }
@@ -169,8 +165,6 @@ build_liblinear() {
 
 build_merci() {
     cd "$ROOT/MERCI"
-    apply_patch ../patches/merci.patch
-
     local base="https://pages.cs.wisc.edu/~apoduval/MERCI/data"
     mkdir -p data/4_filtered/amazon_All
     wget -nc -P data/4_filtered/amazon_All \
