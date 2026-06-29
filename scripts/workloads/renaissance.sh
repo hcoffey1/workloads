@@ -33,8 +33,21 @@ RENAISSANCE_WHITELIST=(
 )
 
 _renaissance_find_jar() {
-    # Newest renaissance-gpl-*.jar under target/ (in case multiple builds linger).
-    ls -t "$RENAISSANCE_DIR"/target/renaissance-gpl-*.jar 2>/dev/null | head -n1
+    # Echo the newest renaissance-gpl-*.jar under target/ (in case multiple builds
+    # linger), or nothing if none exist yet.  MUST stay quiet under `set -euo
+    # pipefail`: the old `ls ... | head` exited non-zero on a no-match (and head
+    # could SIGPIPE the ls), and as the RHS of `jar="$(_renaissance_find_jar)"`
+    # that aborted run.sh with rc=2 BEFORE build_renaissance could fall through to
+    # the sbt build -- i.e. a fresh worker (no JAR) could never build one.  Use a
+    # nullglob loop instead: no pipe, no failing ls, always returns 0.
+    local newest="" f
+    shopt -s nullglob
+    for f in "$RENAISSANCE_DIR"/target/renaissance-gpl-*.jar; do
+        [[ -z "$newest" || "$f" -nt "$newest" ]] && newest="$f"
+    done
+    shopt -u nullglob
+    [[ -n "$newest" ]] && printf '%s\n' "$newest"
+    return 0
 }
 
 _renaissance_in_whitelist() {
