@@ -9,6 +9,16 @@ OGB_CONDA_ENV="${OGB_CONDA_ENV:-ogb}"
 OGB_DIR="$CUR_PATH/ogb"
 OGB_DATA_ROOT="${OGB_DATA_ROOT:-$OGB_DIR/dataset}"
 
+# Force conda's built-in "classic" solver for all ogb conda operations. The base
+# conda on the workers has the conda-libmamba-solver plugin installed, but at a
+# version newer than conda itself (solver 26.4.0 vs conda 26.3.2), so conda
+# cannot load the libmamba plugin and every solve aborts with:
+#   "You have chosen a non-default solver backend (libmamba)... not recognized".
+# classic is always available; solve speed is irrelevant for one-time env setup.
+# (Upgrading base conda to realign versions is the alternative, but it churns the
+# shared base env other workloads rely on, so we pin the solver here instead.)
+export CONDA_SOLVER=classic
+
 # Resolve the conda env's python without needing `conda activate` (the wrapper
 # execs this binary directly under numactl).
 _ogb_env_python() {
@@ -88,7 +98,13 @@ PY
 
         "$env_pip" install --upgrade pip
         # CPU-only torch wheels (no CUDA: execution is pinned to CPU).
-        "$env_pip" install torch --index-url https://download.pytorch.org/whl/cpu
+        # Pin torch to the newest version PyG publishes companion wheels for
+        # (pyg-lib/torch-scatter/torch-sparse at data.pyg.org). Those wheels lag
+        # torch releases, so an unpinned install grabs a too-new torch (e.g.
+        # 2.13.0) and the pyg-lib step below fails with "No matching
+        # distribution". Bump this when data.pyg.org/whl/ adds a newer torch.
+        OGB_TORCH_VERSION="${OGB_TORCH_VERSION:-2.12.1}"
+        "$env_pip" install "torch==${OGB_TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 
         local tver
         tver=$("$env_python" -c "import torch; print(torch.__version__.split('+')[0])")
