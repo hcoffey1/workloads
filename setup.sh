@@ -12,6 +12,8 @@
 #   LOGDIR        directory for per-job logs/status         (default ./setup_logs)
 #   BUILD_SPEC=0  skip the (heavy) SPEC CPU2017 build
 #   SPEC_SRC      path to a SPEC CPU2017 install            (default /proj/instrument-PG0/spec)
+#   BUILD_SPEC2026=0  skip the (heavy) SPEC CPU2026 build
+#   SPEC2026_ISO  path to the CPU2026 ISO   (default /proj/instrument-PG0/cpu2026-1.0.1.iso)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT" || exit 1
@@ -101,20 +103,18 @@ prereqs() {
         autoconf automake libtool \
         libdb-dev libdb++-dev   # Silo (autotools + Berkeley DB db_cxx.h)
 
-    # Miniconda (headless) + dataVis env for plotting/analysis. -b is batch
-    # (no prompts), -u updates an existing install, so this is safe to re-run.
-    local conda_home="$HOME/miniconda3"
-    local conda="$conda_home/bin/conda"
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-py312_26.3.2-2-Linux-x86_64.sh -O "$HOME/miniconda.sh"
-    bash "$HOME/miniconda.sh" -b -u -p "$conda_home"
-    rm -f "$HOME/miniconda.sh"
-    "$conda" init zsh bash
-    # Recent conda gates Anaconda's default channels behind a Terms-of-Service
-    # prompt that blocks headless installs; accept it non-interactively.
-    "$conda" tos accept --override-channels \
-        --channel https://repo.anaconda.com/pkgs/main \
-        --channel https://repo.anaconda.com/pkgs/r
-    "$conda" create -n dataVis pyarrow pandas matplotlib seaborn notebook scikit-learn -y
+    # Miniconda (headless) + dataVis env for plotting/analysis.  Delegated to the
+    # cluster's single source of truth so every provisioning path builds conda the
+    # same, verified way (it installs miniconda if absent, repairs base so it can
+    # solve, and builds+verifies dataVis -- failing loudly if it can't).  Override
+    # the location with ENSURE_CONDA if this ever runs off the instrument-PG0 share.
+    local ensure_conda="${ENSURE_CONDA:-/proj/instrument-PG0/ensure_conda.sh}"
+    if [[ -r "$ensure_conda" ]]; then
+        bash "$ensure_conda"
+    else
+        echo "ERROR: ensure_conda.sh not found at $ensure_conda (set ENSURE_CONDA)" >&2
+        return 1
+    fi
 }
 
 # ----------------------------------------------------------------------------
@@ -223,7 +223,9 @@ build_spec() {
     fi
 
     echo "[spec] installing build toolchain (gcc/g++/gfortran/rsync)"
-    sudo apt-get install -y gcc g++ gfortran rsync
+    # DPkg::Lock::Timeout waits out a concurrent apt (e.g. build_spec2026 running
+    # in parallel) instead of failing with apt's exit 100 on a dpkg-lock clash.
+    sudo apt-get install -y -o DPkg::Lock::Timeout=600 gcc g++ gfortran rsync
 
     # Memory-intensive subset that builds cleanly with system gcc/gfortran 11
     # (see docs/spec2017_integration.md). 503.bwaves_r is multi-invocation
@@ -266,6 +268,29 @@ CFG
     # here; the run dirs are still staged, so don't let it fail the build.
     runcpu --config=clean-gcc --action=setup --size=ref $SPEC_BENCHMARKS || true
     echo "[spec] done. Run with: ./run.sh -b spec -w mcf -o results/spec_test"
+}
+
+# ----------------------------------------------------------------------------
+# SPEC CPU2026 (a.k.a. SPEC CPU v8 / cpuv8): installs the suite *from the ISO*
+# via SPEC's install.sh, writes a clean (non-XRay) -O3 gcc config, then builds
+# and stages refrate run dirs for the memory-intensive subset used by
+# scripts/workloads/spec2026.sh. Heavy (~3.8GB extract + compile). Returns
+# 100 (SKIPPED) when disabled or when the ISO is absent.
+# See docs/spec2026_integration.md.
+# ----------------------------------------------------------------------------
+build_spec2026() {
+    # Delegate to the single source-of-truth provisioner, shared with the sweep's
+    # lazy auto-build (scripts/workloads/spec2026.sh). It handles the
+    # BUILD_SPEC2026=0 / ISO-absent skips (returns 100 = SKIPPED), the ISO
+    # loop-mount + install.sh, the clean-gcc config, and the runcpu build/setup
+    # of the memory-intensive subset. Per-benchmark portability stanzas (for
+    # system gcc/gfortran 11) get appended to clean-gcc.cfg there as build breaks
+    # surface; the CPU2017 analog needed -std=gnu++14 for omnetpp.
+    source "$ROOT/scripts/workloads/spec2026_provision.sh"
+    provision_spec2026_suite
+    local rc=$?
+    (( rc == 0 )) && echo "[spec2026] done. Run with: ./run.sh -b spec2026 -w lbm -o results/spec2026_test"
+    return $rc
 }
 
 # ----------------------------------------------------------------------------
@@ -334,6 +359,7 @@ run_job xsbench    build_xsbench
 run_job npb        build_npb
 run_job minimap2   build_minimap2
 run_job spec       build_spec
+run_job spec2026   build_spec2026
 
 # Wait for all background builds to finish.
 wait

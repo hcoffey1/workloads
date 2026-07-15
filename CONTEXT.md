@@ -30,3 +30,20 @@ its attach→track→detach cycle once per label, each sub-invocation **fully an
 independently tracked** (separate instrument + numastat capture, separate output files).
 `sys_init`/`sys_cleanup` still bracket the whole workload, not each sub-invocation. See
 `docs/adr/0001-multi-invocation-workloads.md`.
+
+### SPEC CPU2017 suite (`-b spec`)
+The SPEC CPU2017 integration. `-b spec` **always** means CPU2017 — the memory-intensive
+`refrate` subset built clean (`-O3` gcc, no XRay) from a pre-existing install at
+`/proj/instrument-PG0/spec`. Suite script `scripts/workloads/spec.sh`; built by
+`setup.sh`'s `build_spec`. See `docs/spec2017_integration.md`.
+
+### SPEC CPU2026 suite (`-b spec2026`)
+The SPEC CPU2026 integration — a **separate** suite, not a version bump of `spec`. SPEC
+markets CPU2026 as **"SPEC CPU v8" (cpuv8)**; the two names are the same product. Its
+benchmark set is entirely disjoint from CPU2017 (new IDs `7xx`/`8xx`, new programs), so it
+gets its own suite script `scripts/workloads/spec2026.sh` and tables. Unlike `spec`, there
+is no pre-built install: `setup.sh`'s `build_spec2026` installs it **from the ISO**
+(`/proj/instrument-PG0/cpu2026-1.0.1.iso`) via SPEC's `install.sh`. Both suites use SPEC's
+`runcpu` only for **build + run-dir staging**; the timed/instrumented run is a direct
+`exec` of the staged binary (see the direct-exec launch model in
+`docs/spec2026_integration.md`).
