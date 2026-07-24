@@ -88,8 +88,15 @@ run_job() {
 # ----------------------------------------------------------------------------
 
 prereqs() {
-    git submodule init
-    git submodule update
+    # --recursive: several submodules (e.g. NPB-CPP) carry nested content that
+    # the builds cd straight into -- build_npb needs NPB-CPP/libs/tbb-2020.1.
+    # --force: a plain `submodule update` is a NO-OP when the recorded SHA
+    # already matches, even if the submodule's working tree has been emptied.
+    # That is exactly how build_npb failed across a whole fleet: NPB-CPP was
+    # registered and "clean" at the right commit, but every file in it was
+    # staged-deleted, so setup silently shipped an empty tree and the build died
+    # on `cd NPB-CPP/libs/tbb-2020.1`. --force re-checks-out the worktree.
+    git submodule update --init --recursive --force
 
     sudo apt-get update
     # intel-mkl (Faiss BLAS backend) prompts a license UI that breaks headless
