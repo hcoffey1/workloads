@@ -91,7 +91,16 @@ PY
     if (( need_install )); then
         echo "Provisioning conda env '$OGB_CONDA_ENV' with CPU-only OGB stack..."
         if [[ ! -x "$env_python" ]]; then
-            conda create -y -n "$OGB_CONDA_ENV" python=3.10
+            # Build from conda-forge only, matching /proj/.../ensure_conda.sh.
+            # A plain `conda create` resolves against Anaconda's pkgs/main +
+            # pkgs/r, which modern conda refuses non-interactively until their
+            # Terms of Service are accepted -- it dies with
+            # CondaToSNonInteractiveError in seconds, run.sh returns 1, and the
+            # smoke harness reports only "fail (run.sh rc=1)" with no stderr.
+            # Pinning the channel avoids that gate entirely and needs no
+            # per-node state that a reprovision would wipe.
+            conda create -y -n "$OGB_CONDA_ENV" python=3.10 \
+                --override-channels --strict-channel-priority -c conda-forge
         fi
         env_python=$(_ogb_env_python)
         local env_pip="${env_python%/python}/pip"
