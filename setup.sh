@@ -191,6 +191,16 @@ build_silo() {
     cd "$ROOT/silo/silo"
     ( cd third-party/lz4 && make library )
     apply_patch ../../patches/silo.patch
+    # Generate masstree/config.h SERIALLY before the parallel build below.
+    # Its Makefile rule starts with `rm -f masstree/config.h`, while the
+    # auto-generated .d files (shipped with the prebuilt .o tree in the deploy
+    # rsync) name that header as 'benchmarks/../masstree/config.h'. No rule
+    # matches that unnormalized path, so make can only satisfy it if the file
+    # already exists. Under -j the `rm -f` can land while another branch is
+    # resolving it, and the build dies with
+    #   No rule to make target 'benchmarks/../masstree/config.h'
+    # in ~12s. Building it single-threaded first closes that window.
+    make masstree/config.h
     make dbtest -j"$J"
 }
 
