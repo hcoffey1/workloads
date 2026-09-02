@@ -25,6 +25,14 @@ declare -g hemem_policy workload_pid NUMASTAT_PID USE_CGROUP
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+run_sudo() {
+    if [[ "${SUDO_NONINTERACTIVE:-0}" == "1" ]]; then
+        command sudo -n "$@"
+    else
+        command sudo "$@"
+    fi
+}
+
 # Function to display usage instructions
 usage() {
     cat << EOF
@@ -116,6 +124,9 @@ invocation_label_seg() {
 }
 
 start_numastat() {
+    if [[ "${WORKLOAD_AUX_MONITORS:-1}" == "0" ]]; then
+        return
+    fi
     local monitor_pid="$1"
     local outfile="${OUTPUT_DIR}/numastat$(invocation_label_seg)_iter${CURRENT_ITERATION}.txt"
     echo "Starting numastat logging to $outfile"
@@ -146,14 +157,14 @@ stop_numastat() {
 sys_init() {
     echo "Initializing system..."
     # Disable randomized va space for consistent memory layout
-    echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
+    echo 0 | run_sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
     # Drop page cache for clean memory state
     sync
-    echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+    echo 3 | run_sudo tee /proc/sys/vm/drop_caches > /dev/null
 
     # Configure perf events access - allow unprivileged perf event access
     # perf.paranoid defaults to 2 (restrict to root), set to 0 to allow unprivileged access
-    echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid > /dev/null
+    echo 0 | run_sudo tee /proc/sys/kernel/perf_event_paranoid > /dev/null
 
     if [[ "${USE_CGROUP:-0}" == "1" ]]; then
         setup_cgroups
@@ -164,11 +175,11 @@ sys_cleanup() {
     echo "Cleaning up system..."
     stop_numastat
     # Re-enable randomized va space
-    echo 2 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
+    echo 2 | run_sudo tee /proc/sys/kernel/randomize_va_space > /dev/null
 
     # Drop page cache for clean memory state
     sync
-    echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+    echo 3 | run_sudo tee /proc/sys/vm/drop_caches > /dev/null
 }
 
 setup_cgroups() {

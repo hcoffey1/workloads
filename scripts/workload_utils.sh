@@ -154,14 +154,14 @@ run_workload_standard() {
     if [[ "${VMA_RECORD:-0}" == "1" ]]; then
         echo "Starting workload with VMA recording..."
         # Run with record_vma.sh wrapper
-        sudo numactl $numa_args \
+        run_sudo numactl $numa_args \
             /usr/bin/time -v -o "$TIMEFILE" \
             "$CUR_PATH/scripts/vma/record_vma.sh" "$OUTPUT_DIR" \
             "$WRAPPER" \
             1> "$STDOUT" 2> "$STDERR" &
     else
         # run under numactl; time measures the wrapper -> execed binary
-        sudo numactl $numa_args \
+        run_sudo numactl $numa_args \
             /usr/bin/time -v -o "$TIMEFILE" \
             "$WRAPPER" \
             1> "$STDOUT" 2> "$STDERR" &

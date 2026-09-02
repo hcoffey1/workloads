@@ -141,10 +141,12 @@ run_micro_interference() {
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args" "$extra_envs"
     run_workload_standard "--cpunodebind=0 -p 0"
 
-    start_bwmon
-    start_mpstat
-    start_perf_monitor
-    start_cpufreq
+    if [[ "${WORKLOAD_AUX_MONITORS:-1}" != "0" ]]; then
+        start_bwmon
+        start_mpstat
+        start_perf_monitor
+        start_cpufreq
+    fi
 }
 
 run_strace_micro_interference() {
@@ -152,6 +154,9 @@ run_strace_micro_interference() {
 }
 
 clean_micro_interference() {
+    if [[ "${WORKLOAD_AUX_MONITORS:-1}" == "0" ]]; then
+        return
+    fi
     stop_bwmon || true
     stop_mpstat || true
     stop_perf_monitor || true
