@@ -541,6 +541,7 @@ static void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [OPTIONS]\n"
               << "\nGlobal Options:\n"
               << "  --duration <sec>         Total benchmark duration (default: 30)\n"
+              << "  --startup-delay <sec>    Idle delay after prefault, before workers (default: 10)\n"
               << "  --sample-period <ms>     Throughput sampling period in ms (default: 1000)\n"
               << "\nSequential Pattern Options:\n"
               << "  --seq-regions <n>        Number of sequential regions (default: 2)\n"
@@ -588,6 +589,7 @@ int main(int argc, char** argv) {
 
     // --- Defaults ---
     double duration_sec = 30.0;
+    double startup_delay_sec = 10.0;
     int sample_period_ms = 1000;
 
     // Sequential defaults
@@ -623,6 +625,8 @@ int main(int argc, char** argv) {
             return 0;
         } else if (arg == "--duration" && i + 1 < argc) {
             duration_sec = std::stod(argv[++i]);
+        } else if (arg == "--startup-delay" && i + 1 < argc) {
+            startup_delay_sec = std::stod(argv[++i]);
         } else if (arg == "--sample-period" && i + 1 < argc) {
             sample_period_ms = std::stoi(argv[++i]);
         } else if (arg == "--seq-regions" && i + 1 < argc) {
@@ -670,6 +674,7 @@ int main(int argc, char** argv) {
 
     // --- Validate ---
     if (seq_stride == 0) seq_stride = 4096;
+    if (startup_delay_sec < 0) startup_delay_sec = 0.0;
     if (seq_phase_duration <= 0) seq_phase_duration = 5.0;
     if (zipf_item_size == 0) zipf_item_size = 4096;
     if (seq_threads < 0) seq_threads = 0;
@@ -712,7 +717,8 @@ int main(int argc, char** argv) {
 
     // --- Print Configuration ---
     std::cout << "micro_interference: duration=" << duration_sec << "s"
-              << " sample_period=" << sample_period_ms << "ms\n";
+              << " sample_period=" << sample_period_ms << "ms"
+              << " startup_delay=" << startup_delay_sec << "s\n";
     std::cout << "  Sequential: regions=" << seq_regions << " region_mb=" << seq_region_mb
               << " stride=" << seq_stride << " delay=" << seq_delay << "s"
               << " phase_duration=" << seq_phase_duration << "s"
@@ -813,7 +819,10 @@ int main(int argc, char** argv) {
         }
         std::cout << "  Start: 0x" << std::hex << seq_start << std::dec << "\n";
         std::cout << "  End:   0x" << std::hex << seq_end << std::dec << "\n";
-        sleep(10);
+        if (startup_delay_sec > 0.0) {
+            std::this_thread::sleep_for(
+                std::chrono::duration<double>(startup_delay_sec));
+        }
         update_regent_region(0, seq_start, seq_end);
     }
     if (zipf_region.buf) {

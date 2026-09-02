@@ -11,6 +11,7 @@ config_micro_interference() {
     # Global settings
     INTERFERENCE_DURATION="${INTERFERENCE_DURATION:-60}"           # Total benchmark duration (seconds)
     INTERFERENCE_SAMPLE_PERIOD="${INTERFERENCE_SAMPLE_PERIOD:-1000}" # Sampling period (ms)
+    INTERFERENCE_STARTUP_DELAY="${INTERFERENCE_STARTUP_DELAY:-10}" # Idle delay after prefault (seconds)
 
     # Sequential pattern settings (8 x 2GB = 16GB)
     SEQ_REGIONS="${SEQ_REGIONS:-64}"                   # Number of sequential regions
@@ -107,6 +108,7 @@ run_micro_interference() {
     local args=""
     args="$args --duration $INTERFERENCE_DURATION"
     args="$args --sample-period $INTERFERENCE_SAMPLE_PERIOD"
+    args="$args --startup-delay $INTERFERENCE_STARTUP_DELAY"
 
     # Sequential args
     args="$args --seq-regions $SEQ_REGIONS"

@@ -61,9 +61,10 @@ the seq-stalls regime here, because the rates differ.
 The benchmark's own measured run, printed as `Total Time: <s>` in the stdout
 SUMMARY — the region-of-interest between `===ROI_START===` and `===ROI_END===`.
 Distinct from `/usr/bin/time -v`'s "Elapsed (wall clock) time" in `_time.txt`,
-which also includes the binary's fixed startup (a hardcoded `sleep(10)` before it
-publishes region bounds, plus prefault) and tiering teardown — so Elapsed runs
-~10s+ longer. Use **Runtime (ROI)** to compare a policy's effect on the workload;
+which also includes the binary's startup delay (`--startup-delay`, 10 seconds by
+default, after prefault and before it publishes region bounds) and tiering
+teardown — so Elapsed normally runs ~10s+ longer. Use **Runtime (ROI)** to
+compare a policy's effect on the workload;
 use `_time.txt` Elapsed only when startup/teardown overhead is itself the subject.
 Summarized per (policy, peak_rss) by `plot_micro_sync_summary.py` alongside the
 two zones' **Stall** times.
