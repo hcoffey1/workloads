@@ -106,6 +106,7 @@ VMA Recording:   ${VMA_RECORD:-0}
 Cgroup Enabled:  ${USE_CGROUP:-0}
 Iterations:      $ITERATIONS
 Hemem Policy:    $hemem_policy
+NUMA Placement:  ${NUMA_PLACEMENT:-slow-bind} ($(workload_numa_args))
 ==================================
 EOF
 }
@@ -612,6 +613,11 @@ main() {
     # Validate and setup workload
     local suite_script="$CUR_PATH/scripts/workloads/${SUITE}.sh"
     validate_workload_script "$suite_script"
+
+    # print_config reports the resolved NUMA placement, so the helper must be
+    # defined here. Most suites source workload_utils.sh themselves, but not all
+    # do -- source it directly rather than depending on the suite to.
+    source "$CUR_PATH/scripts/workload_utils.sh"
 
     print_config
 

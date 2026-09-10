@@ -20,6 +20,7 @@
 #include <inttypes.h>
 #include <fstream>
 #include <cctype>
+#include <dlfcn.h>
 
 #if defined(__x86_64__) || defined(__i386__)
 #include <immintrin.h>
@@ -94,6 +95,92 @@ void annotate_event(const std::string& msg) {
 
         outfile << std::fixed << std::setprecision(6) << elapsed.count() << " " << msg << "\n";
         outfile.close();
+    }
+}
+
+// =============================================================================
+// APPLICATION-DEFINED REGENT REGIONS (opt-in)
+// =============================================================================
+
+// Declare each workload zone to REGENT instead of letting it infer regions by
+// clustering.  The entry point is resolved with dlsym so this binary still
+// builds and runs with no REGENT present; when the feature is requested and
+// anything goes wrong the run aborts rather than silently falling back to
+// inferred clustering, which would look like a valid result.
+typedef int (*regent_register_region_fn)(void*, size_t, uint32_t, const char*,
+                                         uint64_t);
+
+struct AppRegionConfig {
+    bool enabled = false;
+    std::string zipf_policy;
+    uint64_t zipf_fast_bytes = 0;
+    std::string seq_policy;
+    uint64_t seq_fast_bytes = 0;
+};
+
+// Region ids are part of the experiment's identity: keep them pinned here
+// rather than derived from which zones happen to be enabled.
+static const uint32_t APP_REGION_ZIPF = 0;
+static const uint32_t APP_REGION_SEQ  = 1;
+
+// Binary one-letter units ("8G"), matching REGENT's runtime size strings.
+// Distinct from parse_count() above, whose k/m/g are decimal.
+static uint64_t parse_size_bytes(const char* arg) {
+    std::string s(arg);
+    if (s.empty()) {
+        std::cerr << "Invalid size: empty value\n";
+        exit(1);
+    }
+    uint64_t mult = 1;
+    char last = static_cast<char>(std::toupper(static_cast<unsigned char>(s.back())));
+    if (last == 'K') { mult = 1024ULL; s.pop_back(); }
+    else if (last == 'M') { mult = 1024ULL * 1024ULL; s.pop_back(); }
+    else if (last == 'G') { mult = 1024ULL * 1024ULL * 1024ULL; s.pop_back(); }
+    else if (!std::isdigit(static_cast<unsigned char>(last))) {
+        std::cerr << "Invalid size suffix in '" << arg
+                  << "' (use K/M/G or a bare byte count)\n";
+        exit(1);
+    }
+    if (s.empty()) {
+        std::cerr << "Invalid size '" << arg << "': no number before suffix\n";
+        exit(1);
+    }
+    for (size_t i = 0; i < s.size(); i++) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) {
+            std::cerr << "Invalid size '" << arg << "': not an integer\n";
+            exit(1);
+        }
+    }
+    return strtoull(s.c_str(), nullptr, 10) * mult;
+}
+
+static regent_register_region_fn resolve_regent_register() {
+    void* sym = dlsym(RTLD_DEFAULT, "regent_register_region");
+    if (!sym) {
+        std::cerr << "ERROR: --app-regions requested but "
+                     "regent_register_region is not available. Preload "
+                     "libarms_kernel.so and set "
+                     "REGENT_REGION_MODE=application.\n";
+        exit(1);
+    }
+    return reinterpret_cast<regent_register_region_fn>(sym);
+}
+
+static void register_app_region(regent_register_region_fn fn, void* base,
+                                size_t bytes, uint32_t region_id,
+                                const std::string& policy, uint64_t fast_bytes,
+                                const char* label) {
+    std::cout << "REGENT region " << region_id << " (" << label
+              << "): base=0x" << std::hex
+              << reinterpret_cast<uintptr_t>(base) << std::dec
+              << " bytes=" << bytes
+              << " policy=" << policy
+              << " fast=" << (fast_bytes / (1024 * 1024)) << " MB\n";
+    int rc = fn(base, bytes, region_id, policy.c_str(), fast_bytes);
+    if (rc != 0) {
+        std::cerr << "ERROR: regent_register_region failed for " << label
+                  << " (rc=" << rc << ")\n";
+        exit(1);
     }
 }
 
@@ -549,6 +636,11 @@ static void print_usage(const char* prog) {
               << "\nGlobal Options:\n"
               << "  --duration <sec>         Total benchmark duration (default: 30)\n"
               << "  --startup-delay <sec>    Idle delay after prefault, before workers (default: 10)\n"
+              << "  --app-regions            Declare each zone to REGENT (needs REGENT_REGION_MODE=application)\n"
+              << "  --zipf-policy <name>     Policy for the zipfian zone (with --app-regions)\n"
+              << "  --zipf-fast <size>       Fast-tier budget for the zipfian zone, e.g. 1G\n"
+              << "  --seq-policy <name>      Policy for the sequential zone (with --app-regions)\n"
+              << "  --seq-fast <size>        Fast-tier budget for the sequential zone, e.g. 2G\n"
               << "  --sample-period <ms>     Throughput sampling period in ms (default: 1000)\n"
               << "\nSequential Pattern Options:\n"
               << "  --seq-regions <n>        Number of sequential regions (default: 2)\n"
@@ -609,6 +701,9 @@ int main(int argc, char** argv) {
     int seq_threads = 1;
     double seq_time_offset = 0.0;
 
+    // Application-defined REGENT regions (opt-in; off keeps the old behaviour)
+    AppRegionConfig app_regions;
+
     // Zipfian defaults
     size_t zipf_region_mb = 0; // 0 = disabled
     size_t zipf_item_size = 4096;
@@ -632,6 +727,16 @@ int main(int argc, char** argv) {
             return 0;
         } else if (arg == "--duration" && i + 1 < argc) {
             duration_sec = std::stod(argv[++i]);
+        } else if (arg == "--app-regions") {
+            app_regions.enabled = true;
+        } else if (arg == "--zipf-policy" && i + 1 < argc) {
+            app_regions.zipf_policy = argv[++i];
+        } else if (arg == "--zipf-fast" && i + 1 < argc) {
+            app_regions.zipf_fast_bytes = parse_size_bytes(argv[++i]);
+        } else if (arg == "--seq-policy" && i + 1 < argc) {
+            app_regions.seq_policy = argv[++i];
+        } else if (arg == "--seq-fast" && i + 1 < argc) {
+            app_regions.seq_fast_bytes = parse_size_bytes(argv[++i]);
         } else if (arg == "--startup-delay" && i + 1 < argc) {
             startup_delay_sec = std::stod(argv[++i]);
         } else if (arg == "--sample-period" && i + 1 < argc) {
@@ -686,6 +791,13 @@ int main(int argc, char** argv) {
     if (zipf_item_size == 0) zipf_item_size = 4096;
     if (seq_threads < 0) seq_threads = 0;
     if (zipf_threads < 0) zipf_threads = 0;
+    // A zone with no memory gets no workers.  The zipfian spawn loop is already
+    // guarded by its region size, but the sequential one is not, so
+    // --seq-regions 0 used to start a worker that indexed an empty
+    // seq_region_vec and crashed.  Normalising the count here keeps the spawn,
+    // the done flags and the join loops consistent.
+    if (seq_regions == 0) seq_threads = 0;
+    if (zipf_region_mb == 0) zipf_threads = 0;
     if (seq_time_offset < 0) seq_time_offset = 0.0;
 
     // --- Validate sync (zone-aggregate lockstep barrier) ---
@@ -720,6 +832,26 @@ int main(int argc, char** argv) {
     if (sync_rounds > 0 && !sync_enabled) {
         std::cerr << "Error: --sync-rounds requires --seq-sync and --zipf-sync\n";
         return 1;
+    }
+
+    // Application-region config is validated before anything is allocated: a
+    // missing policy name should fail immediately, not after a 60 GB prefault.
+    // Only ENABLED zones need a declaration; a disabled zone is not registered.
+    if (app_regions.enabled) {
+        if (seq_regions > 0 && app_regions.seq_policy.empty()) {
+            std::cerr << "Error: --app-regions needs --seq-policy while the "
+                         "sequential zone is enabled\n";
+            return 1;
+        }
+        if (zipf_region_mb > 0 && app_regions.zipf_policy.empty()) {
+            std::cerr << "Error: --app-regions needs --zipf-policy while the "
+                         "zipfian zone is enabled\n";
+            return 1;
+        }
+        if (seq_regions == 0 && zipf_region_mb == 0) {
+            std::cerr << "Error: --app-regions with no zone enabled\n";
+            return 1;
+        }
     }
 
     // --- Print Configuration ---
@@ -826,11 +958,10 @@ int main(int argc, char** argv) {
         }
         std::cout << "  Start: 0x" << std::hex << seq_start << std::dec << "\n";
         std::cout << "  End:   0x" << std::hex << seq_end << std::dec << "\n";
-        if (startup_delay_sec > 0.0) {
-            std::this_thread::sleep_for(
-                std::chrono::duration<double>(startup_delay_sec));
-        }
-        update_regent_region(0, seq_start, seq_end);
+        // The startup delay used to sit here, inside the sequential-only
+        // branch and before the bounds file was published.  It now runs once
+        // after every zone is registered, so a Zipfian-only run gets it too.
+        if (!app_regions.enabled) update_regent_region(0, seq_start, seq_end);
     }
     if (zipf_region.buf) {
         std::cout << "Zipfian Zone (" << zipf_region_mb << " MB):\n";
@@ -846,7 +977,11 @@ int main(int argc, char** argv) {
             num_regent_regions = std::atoi(num_regions_env);
         }
 
-        if (num_regent_regions == 2) {
+        // The bounds-file mechanism targets the retired static runtime and must
+        // stay inactive when the application declares its regions directly.
+        if (app_regions.enabled) {
+            // nothing to publish
+        } else if (num_regent_regions == 2) {
             // Case 2 Regions: Region 0 (Seq), Region 1 (Entire Zipf)
             update_regent_region(1, zipf_start, zipf_end);
         } else {
@@ -868,6 +1003,38 @@ int main(int argc, char** argv) {
         }
     }
     std::cout << "=====================================\n\n";
+
+    // --- Declare the zones to REGENT ---
+    // After every active slice is prefaulted, and before the startup delay and
+    // the ROI, so ownership is in place for the whole measured run.  One call
+    // per zone: the sequential slices are carved contiguously from the start of
+    // the mapping, so a single range covers them all.  Neither the 1 GB gap nor
+    // the full mapping is registered — unregistered memory stays unmanaged.
+    if (app_regions.enabled) {
+        regent_register_region_fn reg_fn = resolve_regent_register();
+
+        if (zipf_region.buf) {
+            register_app_region(reg_fn, zipf_region.buf, zipf_region.bytes,
+                                APP_REGION_ZIPF, app_regions.zipf_policy,
+                                app_regions.zipf_fast_bytes, "zipfian");
+        }
+        if (!seq_region_vec.empty()) {
+            size_t seq_total = seq_region_vec.size() * seq_bytes_aligned;
+            register_app_region(reg_fn, global_buf, seq_total, APP_REGION_SEQ,
+                                app_regions.seq_policy,
+                                app_regions.seq_fast_bytes, "sequential");
+        }
+        std::cout << "REGENT regions registered\n\n";
+    }
+
+    // --- Startup delay ---
+    // Placement matters: after registration (so the delay lets placement settle
+    // under the declared regions, not before they exist) and outside the
+    // sequential-zone branch it used to live in.
+    if (startup_delay_sec > 0.0) {
+        std::this_thread::sleep_for(
+            std::chrono::duration<double>(startup_delay_sec));
+    }
 
     // --- Setup atomics (cache-line-padded to prevent false sharing) ---
     PaddedAtomicBool global_stop;

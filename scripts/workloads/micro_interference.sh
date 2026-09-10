@@ -121,6 +121,20 @@ run_micro_interference() {
     args="$args --seq-threads $SEQ_THREADS"
     args="$args --seq-time-offset $SEQ_TIME_OFFSET"
 
+    # Application-defined REGENT regions (opt-in).  Off by default so ordinary
+    # runs are unchanged; when on, the runtime mode is set here rather than left
+    # to the caller's environment, so the binary and the runtime cannot disagree
+    # about which mode the run is in.
+    if [[ "${APP_REGIONS:-0}" == "1" ]]; then
+        args="$args --app-regions"
+        [[ -n "${SEQ_POLICY:-}" ]]  && args="$args --seq-policy $SEQ_POLICY"
+        [[ -n "${SEQ_FAST:-}" ]]    && args="$args --seq-fast $SEQ_FAST"
+        [[ -n "${ZIPF_POLICY:-}" ]] && args="$args --zipf-policy $ZIPF_POLICY"
+        [[ -n "${ZIPF_FAST:-}" ]]   && args="$args --zipf-fast $ZIPF_FAST"
+        if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
+        extra_envs+="export REGENT_REGION_MODE=application"
+    fi
+
     # Zipfian args
     args="$args --zipf-region-mb $ZIPF_REGION_MB"
     args="$args --zipf-item-size $ZIPF_ITEM_SIZE"
