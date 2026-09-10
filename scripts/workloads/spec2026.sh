@@ -223,7 +223,7 @@ run_spec2026(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$spec_exe" \
         "$args" "" "$spec_rundir"
 
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 }
 
 run_strace_spec2026(){

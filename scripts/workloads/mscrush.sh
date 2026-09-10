@@ -301,7 +301,7 @@ run_mscrush(){
             echo "Manifest: $manifest_path"
             echo "To run consensus later: MSCRUSH_PHASE=consensus MSCRUSH_CLUSTER_PREFIX=$cluster_prefix ./run.sh ..."
 
-            run_workload_standard "--cpunodebind=0 --membind=0"
+            run_workload_standard
             start_bwmon
             ;;
         "consensus")
@@ -332,7 +332,7 @@ run_mscrush(){
             echo "MGF pattern: $MSCRUSH_INPUT_FILES"
             echo "Consensus prefix: $consensus_prefix"
 
-            run_workload_standard "--cpunodebind=0 --membind=0"
+            run_workload_standard
             start_bwmon
             ;;
         *)

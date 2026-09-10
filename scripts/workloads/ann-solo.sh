@@ -403,7 +403,7 @@ export OMP_NUM_THREADS=\"$ANN_SOLO_THREADS\""
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$python_bin" "$binary_args" "$extra_env"
 
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard
 
     start_bwmon
 }

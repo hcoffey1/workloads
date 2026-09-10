@@ -208,7 +208,7 @@ EOF
 
     # Run workload using standard execution
     # Note: feedsim wrapper handles both server and client, so we just need to launch it
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard
 
     start_bwmon
 }

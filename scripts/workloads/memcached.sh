@@ -32,8 +32,9 @@ build_memcached(){
 run_memcached(){
     local workload=$1
 
-    # Start memcached server (64 GB), bind to NUMA node 0
-    numactl --cpunodebind=0 --membind=0 \
+    # Start memcached server (64 GB). This is the measured, tiered process, so
+    # it takes the global placement policy.
+    numactl $(workload_numa_args) \
         sudo LD_PRELOAD=$HEMEMPOL DRAMSIZE=$DRAMSIZE MIN_INTERPOSE_MEM_SIZE=$MIN_INTERPOSE_MEM_SIZE \
         $CUR_PATH/memcached/memcached -u $(whoami) -d -p 11211 -m 67108864 -t $server_threads
 
@@ -66,7 +67,12 @@ exec ./bin/ycsb run memcached -s -P "$CUR_PATH/YCSB/workloads/workloada" \\
 EOF
     chmod +x "$WRAPPER"
 
-    # run under numactl on NUMA node 1; time measures the wrapper -> execed ycsb
+    # The YCSB client is pinned to node 1 to keep the load generator off the
+    # server's node. That is client isolation, NOT tier placement, so it does not
+    # use workload_numa_args. NOTE: under the slow-bind default the server's data
+    # also lives on node 1, so client and server now share it -- revisit which
+    # node the generator belongs on before trusting a memcached tiering result.
+    # time measures the wrapper -> execed ycsb
     if [[ "${VMA_RECORD:-0}" == "1" ]]; then
         echo "Starting memcached with VMA recording..."
         sudo /usr/bin/time -v -o "$TIMEFILE" \

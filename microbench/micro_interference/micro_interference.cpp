@@ -234,9 +234,16 @@ static void* alloc_region(size_t bytes) {
         if (p != MAP_FAILED) {
             return p;
         }
-        // MAP_HUGETLB failed; fall back to MADV_HUGEPAGE
+        // Deliberately fatal rather than falling back to MADV_HUGEPAGE. The
+        // fallback made backing depend on whether a hugetlb pool happened to be
+        // reserved, so the same USE_HUGETLB setting could silently yield either
+        // hugetlb or THP -- runs that are not comparable, with nothing in the
+        // config recording which one happened. Reserve a pool or unset
+        // USE_HUGETLB; do not let the run pick for itself.
         std::cerr << "mmap MAP_HUGETLB failed (" << strerror(errno)
-                  << "), falling back to MADV_HUGEPAGE\n";
+                  << "). USE_HUGETLB is set but no hugetlb pages are available; "
+                     "reserve them or unset USE_HUGETLB.\n";
+        return nullptr;
     }
     void* p = mmap_aligned_2mb(aligned_bytes);
     if (p == MAP_FAILED) {

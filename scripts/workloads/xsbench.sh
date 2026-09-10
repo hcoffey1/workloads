@@ -26,7 +26,7 @@ run_xsbench(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "$binary_args" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Run with standard execution
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
     start_bwmon
 }
 

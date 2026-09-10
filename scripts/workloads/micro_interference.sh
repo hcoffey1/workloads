@@ -99,9 +99,10 @@ run_micro_interference() {
         extra_envs+="export REGENT_NUM_REGIONS=\"$REGENT_NUM_REGIONS\""
     fi
 
-    # Always use huge pages
-    if [[ -n "$extra_envs" ]]; then extra_envs+=$'\n'; fi
-    extra_envs+="export USE_HUGETLB=1"
+    # No USE_HUGETLB: the harness reserves no hugetlb pool, so this only ever
+    # fell through to MADV_HUGEPAGE. Runs are THP-backed; say so rather than
+    # carrying a setting that claims otherwise. Setting USE_HUGETLB=1 without a
+    # reserved pool is now a hard error in the binary, not a silent fallback.
 
     generate_workload_filenames "$workload"
 
@@ -139,7 +140,12 @@ run_micro_interference() {
     fi
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args" "$extra_envs"
-    run_workload_standard "--cpunodebind=0 -p 0"
+    # Placement comes from workload_numa_args (see scripts/workload_utils.sh).
+    # This workload is why the default is slow-bind: it first-touches its whole
+    # footprint before REGENT owns any of it, so a fast-tier default handed every
+    # zone a resident set far above its budget and the run measured the policies
+    # shedding back down instead of choosing what to promote.
+    run_workload_standard
 
     if [[ "${WORKLOAD_AUX_MONITORS:-1}" != "0" ]]; then
         start_bwmon

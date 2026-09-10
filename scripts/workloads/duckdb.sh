@@ -93,7 +93,7 @@ run_duckdb(){
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$binary_path" "$binary_args"
 
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }

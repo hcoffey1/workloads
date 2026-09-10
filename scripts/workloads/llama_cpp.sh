@@ -190,7 +190,7 @@ run_llama_cpp() {
     # ---- Standard workload execution ----
     generate_workload_filenames "$workload"
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args" "$extra_envs"
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }
@@ -236,7 +236,7 @@ _run_llama_server() {
     echo "Starting llama-server (${LLAMA_SERVER_PARALLEL} parallel slots)..."
 
     set +e
-    sudo numactl --cpunodebind=0 -p 0 \
+    sudo numactl $(workload_numa_args) \
         /usr/bin/time -v -o "$TIMEFILE" \
         "$WRAPPER" \
         1> /dev/null 2> "$server_stderr" &

@@ -40,7 +40,7 @@ run_graph500(){
 export OMP_NUM_THREADS=\"$num_threads\""
     
     # Run with standard execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard
 
     start_bwmon
 }

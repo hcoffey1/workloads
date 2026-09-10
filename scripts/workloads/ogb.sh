@@ -189,7 +189,7 @@ export MKL_NUM_THREADS=\"$num_threads\""
         "$OGB_DIR/ogb_gnn.py" "$extra_env" "$OGB_DIR"
 
     # -p 0: prefer NUMA node 0 but allow spill so memory-tiering policies engage.
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }

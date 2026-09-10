@@ -132,9 +132,54 @@ EOF
     chmod +x "$wrapper_path"
 }
 
+# ---- NUMA placement ---------------------------------------------------------
+# One source of truth for how workloads are placed across the tiers. Suites call
+# run_workload_standard with no argument and inherit this, rather than each
+# spelling out its own numactl flags -- placement then changes in one place and
+# node numbers are not hardcoded per suite.
+#
+# REGENT_FAST_NODE / REGENT_SLOW_NODE name the tiers (default 0 / 1).
+# NUMA_PLACEMENT selects the policy:
+#   slow-bind      (default) --membind=$SLOW. Nothing is fast-tier resident
+#                  until a tiering policy promotes it, so fast-tier occupancy
+#                  measures the policy's decisions instead of first-touch order.
+#                  A run WITHOUT a tiering runtime is therefore an all-slow
+#                  baseline, not a DRAM one.
+#   fast-bind      --membind=$FAST. Hard fast-tier residency; fails rather than
+#                  spilling when the footprint exceeds the node.
+#   fast-preferred -p $FAST. Soft; first-touch prefers fast, spills to slow.
+#
+# CPUs stay on the fast node under every policy. A suite may pass a policy name
+# to override for one workload, but prefer setting NUMA_PLACEMENT for a whole
+# experiment so the choice is recorded once.
+workload_numa_args() {
+    local placement="${1:-${NUMA_PLACEMENT:-slow-bind}}"
+    local fast="${REGENT_FAST_NODE:-0}"
+    local slow="${REGENT_SLOW_NODE:-1}"
+
+    case "$placement" in
+        slow-bind)      echo "--cpunodebind=$fast --membind=$slow" ;;
+        fast-bind)      echo "--cpunodebind=$fast --membind=$fast" ;;
+        fast-preferred) echo "--cpunodebind=$fast -p $fast" ;;
+        *)
+            echo "ERROR: unknown NUMA_PLACEMENT '$placement'" \
+                 "(expected slow-bind, fast-bind, or fast-preferred)" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Run workload with standard timing and monitoring
 run_workload_standard() {
-    local numa_args="${1:-"--cpunodebind=0 --membind=0"}"
+    local numa_args="${1:-$(workload_numa_args)}"
+
+    # An unknown NUMA_PLACEMENT leaves this empty: the subshell's failure is not
+    # visible in an argument context, so catch it here rather than silently
+    # launching with no numactl flags at all.
+    if [[ -z "$numa_args" ]]; then
+        echo "ERROR: no numactl arguments resolved; check NUMA_PLACEMENT" >&2
+        return 1
+    fi
 
     # Validate required variables
     if [[ -z "$WRAPPER" || -z "$TIMEFILE" || -z "$STDOUT" || -z "$STDERR" || -z "$PIDFILE" ]]; then

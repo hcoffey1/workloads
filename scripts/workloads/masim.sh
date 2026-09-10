@@ -38,7 +38,7 @@ run_masim(){
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$masim_bin" "$masim_args"
 
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 }
 
 run_strace_masim(){

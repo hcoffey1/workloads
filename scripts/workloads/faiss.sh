@@ -58,7 +58,7 @@ run_faiss(){
         "cd \"$CUR_PATH/faiss\"
 export OMP_NUM_THREADS=\"$num_threads\""
 
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }

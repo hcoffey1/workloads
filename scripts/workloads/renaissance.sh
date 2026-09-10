@@ -136,7 +136,7 @@ run_renaissance() {
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "/usr/bin/java" "$full_args"
 
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }

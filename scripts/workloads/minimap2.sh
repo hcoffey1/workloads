@@ -290,7 +290,7 @@ run_minimap2(){
     echo "This may take a while for large datasets..."
     
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 --membind=0"
+    run_workload_standard
     
     start_bwmon
 }run_strace_minimap2(){

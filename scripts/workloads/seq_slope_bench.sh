@@ -36,7 +36,7 @@ run_seq_slope_bench(){
 
     generate_workload_filenames "$workload"
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$seq_slope_args"
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 }
 
 run_strace_seq_slope_bench(){

@@ -67,7 +67,7 @@ run_micro_phase(){
     args="${args} ${phase_zipf_repeats} ${phase_zipf_sleep_sec} ${phase_zipf_unmap}"
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$bin" "$args"
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }

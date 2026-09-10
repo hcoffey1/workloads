@@ -24,7 +24,7 @@ run_silo(){
     create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/silo/silo/out-perf.masstree/benchmarks/dbtest" "--verbose --bench \"$benchmark\" --scale-factor \"$sf\" --ops-per-worker \"$ops\" --num-threads \"$num_threads\""
 
     # Use standard workload execution
-    run_workload_standard "--cpunodebind=0 -p 0"
+    run_workload_standard
 
     start_bwmon
 }
