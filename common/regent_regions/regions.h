@@ -133,6 +133,7 @@ template <class T> class Buffer {
     T *data_ = nullptr;
     size_t count_ = 0;
     size_t mapped_bytes_ = 0;
+    size_t registered_bytes_ = 0;
     bool mapped_ = false;
     bool registered_ = false;
 
@@ -150,7 +151,10 @@ template <class T> class Buffer {
             throw std::runtime_error("cannot change allocated buffer layout");
         mapped_ = true;
     }
-    void resize(size_t count) {
+    // prefault=false maps the capacity without touching it, for buffers whose
+    // active prefix is only known after construction (see
+    // register_prefix_with). Untouched capacity costs no physical memory.
+    void resize(size_t count, bool prefault = true) {
         if (count > SIZE_MAX / sizeof(T))
             throw std::runtime_error("element count overflows");
         if (!mapped_) {
@@ -184,23 +188,43 @@ template <class T> class Buffer {
             munmap(aligned, bytes);
             throw std::runtime_error("MADV_HUGEPAGE failed");
         }
-        // Write every base page, including padding, before registration. This
-        // also avoids admitting the shared zero page for untouched output rows.
-        std::memset(aligned, 0, bytes);
         data_ = static_cast<T *>(aligned);
-        for (size_t i = 0; i < count; ++i)
-            ::new (static_cast<void *>(data_ + i)) T;
+        if (prefault) {
+            // Write every base page, including padding, before registration.
+            // This also avoids admitting the shared zero page for untouched
+            // output rows.
+            std::memset(aligned, 0, bytes);
+            for (size_t i = 0; i < count; ++i)
+                ::new (static_cast<void *>(data_ + i)) T;
+        }
         count_ = count;
         mapped_bytes_ = bytes;
     }
     void register_with(RegisterFn fn, uint32_t id, const Region &region) {
+        register_prefix_with(fn, id, region, count_);
+    }
+    // Register the leading active_count elements, rounded up to whole
+    // migration pages within this mapping. Every base page of that range is
+    // write-touched first (preserving contents) so an unprefaulted mapping
+    // never hands REGENT the shared zero page; the remaining capacity stays
+    // untouched and unmanaged.
+    void register_prefix_with(RegisterFn fn, uint32_t id, const Region &region,
+                              size_t active_count) {
         if (!mapped_bytes_ || registered_)
             throw std::runtime_error(
                 "buffer must be mapped and registered once");
-        if (fn(data_, mapped_bytes_, id, region.policy.c_str(),
-               region.budget) != 0)
+        if (active_count > count_)
+            throw std::runtime_error("active prefix exceeds buffer size");
+        const size_t bytes = round_storage(active_count * sizeof(T));
+        volatile unsigned char *page =
+            reinterpret_cast<volatile unsigned char *>(data_);
+        const size_t step = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+        for (size_t offset = 0; offset < bytes; offset += step)
+            page[offset] = page[offset];
+        if (fn(data_, bytes, id, region.policy.c_str(), region.budget) != 0)
             throw std::runtime_error("registration failed for " + region.name);
         registered_ = true;
+        registered_bytes_ = bytes;
     }
     T &operator[](size_t i) { return data_[i]; }
     const T &operator[](size_t i) const { return data_[i]; }
@@ -209,7 +233,7 @@ template <class T> class Buffer {
     size_t size() const { return count_; }
     size_t logical_bytes() const { return count_ * sizeof(T); }
     size_t mapped_bytes() const { return mapped_bytes_; }
-    size_t registered_bytes() const { return registered_ ? mapped_bytes_ : 0; }
+    size_t registered_bytes() const { return registered_bytes_; }
 };
 
 } // namespace workload_regions

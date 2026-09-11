@@ -140,6 +140,10 @@ can take time and occurs outside the workload invocation. The wrapper and
 stdout manifest define effective settings; recorded environment values may
 include automatic-mode settings subsequently unset by the wrapper.
 
+MERCI predates the shared `zones.h` option/manifest helpers used by
+[PageRank](gapbs_pr_regions.md) and [CG](npb_cg_regions.md); its manifest
+keeps schema version 1 with one buffer per zone.
+
 ## Validation and remaining hardware work
 
 `make test` builds all three evaluation binaries and uses a generated dataset

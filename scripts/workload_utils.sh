@@ -353,3 +353,67 @@ print_workload_info() {
     echo "  Wrapper: $WRAPPER"
     echo "============================="
 }
+
+# ------------------------------------------------------------------------------
+# Application-defined REGENT zones (shared by gapbs pr and npb-cpp cg; MERCI
+# predates this helper and carries its own copy in merci.sh).
+#
+#   regent_zones_prepare_args <PREFIX> <mode> <zone>...
+#
+# Reads <PREFIX>_<ZONE>_POLICY / <PREFIX>_<ZONE>_FAST for every zone (zone name
+# upper-cased) and optional <PREFIX>_WARMUPS, and sets
+#   ZONE_ARGS       quoted --app-regions/--app-region/--warmups arguments
+#   ZONE_EXTRA_ENV  wrapper lines selecting the matching runtime mode
+# <mode> is off, layout, or application. Application mode requires every
+# zone's policy and budget and unsets the automatic-mode settings the runtime
+# rejects; layout mode drops LD_PRELOAD and the runtime mode; policy/budget
+# variables outside application mode are an error.
+# ------------------------------------------------------------------------------
+regent_zones_quote(){
+    # create_workload_wrapper emits /bin/sh: POSIX single quoting only.
+    local value=${1//\'/\'\\\'\'}
+    printf "'%s'" "$value"
+}
+
+regent_zones_prepare_args(){
+    local prefix=$1 mode=$2 zone var policy fast
+    shift 2
+    local -a args=()
+    ZONE_ARGS=""
+    ZONE_EXTRA_ENV=""
+    case "$mode" in
+        application|layout|off) ;;
+        *) echo "ERROR: ${prefix}_REGION_MODE must be off, layout, or application" >&2; return 1 ;;
+    esac
+    for zone in "$@"; do
+        var="${prefix}_${zone^^}"
+        policy="${var}_POLICY"; fast="${var}_FAST"
+        policy=${!policy:-}; fast=${!fast:-}
+        if [[ "$mode" == application ]]; then
+            if [[ -z "$policy" || -z "$fast" ]]; then
+                echo "ERROR: ${var}_POLICY and ${var}_FAST are required for application regions" >&2
+                return 1
+            fi
+            args+=(--app-region "$zone:$policy:$fast")
+        elif [[ -n "$policy" || -n "$fast" ]]; then
+            echo "ERROR: ${var}_POLICY/${var}_FAST require ${prefix}_REGION_MODE=application" >&2
+            return 1
+        fi
+    done
+    var="${prefix}_WARMUPS"
+    [[ -n "${!var:-}" ]] && args+=(--warmups "${!var}")
+    case "$mode" in
+        application)
+            args=(--app-regions "${args[@]}")
+            ZONE_EXTRA_ENV=$'unset REGENT_NO_CLUSTERING REGENT_CLUSTER_CONFIG REGENT_REBALANCER\nexport REGENT_REGION_MODE=application'
+            ;;
+        layout)
+            args+=(--region-layout-only)
+            ZONE_EXTRA_ENV=$'unset LD_PRELOAD REGENT_REGION_MODE'
+            ;;
+    esac
+    local option
+    for option in "${args[@]}"; do
+        ZONE_ARGS+=" $(regent_zones_quote "$option")"
+    done
+}

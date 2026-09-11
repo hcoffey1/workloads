@@ -74,7 +74,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | Suite flag (`-b`) | Workload flag (`-w`) | Notes |
 |---|---|---|
 | `graph500` | `graph500` | |
-| `gapbs` | `bfs`, `sssp`, `pr`, `cc`, `bc`, `tc` | Requires graph files in `gapbs/benchmark/graphs/` |
+| `gapbs` | `bfs`, `sssp`, `pr`, `cc`, `bc`, `tc` | Requires graph files in `gapbs/benchmark/graphs/`; `pr` supports application zones (`docs/gapbs_pr_regions.md`) |
 | `xsbench` | `xsbench` | |
 | `flexkvs` | `flexkvs` | |
 | `silo` | `silo` | |
@@ -82,7 +82,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `liblinear` | `liblinear` | Requires `kdd12` dataset download via `setup.sh` |
 | `gups` | `gups` | |
 | `masim` | `masim` | Memory access simulator |
-| `npb-cpp` | varies | NAS Parallel Benchmarks |
+| `npb-cpp` | varies | NAS Parallel Benchmarks; `cg` supports application zones (`docs/npb_cg_regions.md`) |
 | `cloverleaf` | `cloverleaf` | |
 | `minimap2` | `minimap2` | Requires genome data |
 | `llama_cpp` | `llama_cpp` | Requires model weights |

@@ -5,12 +5,23 @@ docs use precisely; keep usage consistent with the definitions here.
 
 ## Glossary
 
-### MERCI application region
-A persistent, application-declared group of 2 MB migration pages in
-`eval_baseline`: `embedding` contains the embedding table and `output` contains
-query-result accumulators. Each region has one policy and fixed fast-tier
-budget; query containers remain unmanaged. Layout-only mode uses the same
-mapped storage without registration. See [MERCI zoning](docs/merci_regions.md).
+### Application zone
+A persistent, application-declared group of 2 MB migration pages that maps to
+one application-defined REGENT region and may span several dedicated
+mappings, each registered with the zone's id and whole budget. Each zone has
+one policy and a fixed fast-tier budget; everything not registered stays
+unmanaged. Layout-only mode uses the same mapped storage without registration.
+The shared helper is `common/regent_regions/` (`regions.h` buffers,
+`zones.h` option extraction and manifests); the harness helper is
+`regent_zones_prepare_args`. Zoned workloads:
+
+- MERCI `eval_baseline`: `embedding`, `output` — [MERCI zoning](docs/merci_regions.md)
+- GAPBS `pr`: `incoming_edges`, `contributions`, `scores`, `vertex_index` —
+  [PageRank zoning](docs/gapbs_pr_regions.md)
+- NPB-CG: `matrix`, `gather_vectors`, `streaming_state` —
+  [CG zoning](docs/npb_cg_regions.md)
+
+`scripts/test_regions.sh` runs every zoning check without hardware.
 
 ### Invocation
 A single launch of a workload binary that the harness tracks as one PID: the wrapper
