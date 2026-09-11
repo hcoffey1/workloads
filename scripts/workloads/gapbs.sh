@@ -5,7 +5,8 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_gapbs(){
     num_threads=8
-    num_rep=20
+    # Trials per invocation; GAPBS_TRIALS lets short experiments use fewer.
+    num_rep=${GAPBS_TRIALS:-20}
     # Synthetic kron scale; GAPBS_GRAPH_SCALE lets smoke runs use a small graph.
     graph_size=${GAPBS_GRAPH_SCALE:-26}
     #graph_size=27
