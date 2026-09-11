@@ -5,6 +5,13 @@ docs use precisely; keep usage consistent with the definitions here.
 
 ## Glossary
 
+### MERCI application region
+A persistent, application-declared group of 2 MB migration pages in
+`eval_baseline`: `embedding` contains the embedding table and `output` contains
+query-result accumulators. Each region has one policy and fixed fast-tier
+budget; query containers remain unmanaged. Layout-only mode uses the same
+mapped storage without registration. See [MERCI zoning](docs/merci_regions.md).
+
 ### Invocation
 A single launch of a workload binary that the harness tracks as one PID: the wrapper
 `exec`s the binary, and DAMON / numastat / PEBS attach to that PID for its lifetime. The

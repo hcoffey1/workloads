@@ -1,28 +1,36 @@
+#ifndef MERCI_EVALUATOR_H
+#define MERCI_EVALUATOR_H
+
+#include "regent_regions/regions.h"
+#include "utils.h"
 
 class Evaluator {
 public:
     /*class members */
-    vector<array<float, EMBEDDING_DIM>> embedding_table;    //embedding table
-    vector<array<float, EMBEDDING_DIM>> qres;
-    vector<TInfo> thrinfo;
-    CustomBarrier cstart;
-    CustomBarrier cend;
-    
-    steady_clock::time_point start;
-    steady_clock::time_point end;
-    size_t core_count;
+  workload_regions::Buffer<array<float, EMBEDDING_DIM>>
+      embedding_table; // embedding table
+  workload_regions::Buffer<array<float, EMBEDDING_DIM>> qres;
+  vector<TInfo> thrinfo;
+  CustomBarrier cstart;
+  CustomBarrier cend;
 
-    /* constructors */
-    Evaluator(int core_count) : core_count(core_count) {
-        //allocate space for thrinfo
-        thrinfo.resize(core_count);
+  steady_clock::time_point start;
+  steady_clock::time_point end;
+  size_t core_count;
+
+  /* constructors */
+  Evaluator(int core_count) : core_count(core_count) {
+      // allocate space for thrinfo
+      thrinfo.resize(core_count);
     }
 
 
+    // Feature ids are 1-based in the filtered datasets (the preprocessing
+    // scripts number items from 1), so the table holds ids 0..num_features.
     void build_embedding_table(int num_features) {
         //random initialization of embedding_table
-        embedding_table.resize(num_features);
-        for (int i=0; i < num_features; i++) {
+        embedding_table.resize(static_cast<size_t>(num_features) + 1);
+        for (int i=0; i <= num_features; i++) {
             for (int j=0; j < EMBEDDING_DIM; j++)
                 embedding_table[i][j] = 0.01 * i; //myRand();
         }
@@ -37,6 +45,8 @@ public:
         // }
         if(qres.size() == 0)
             qres.resize(qcount);
+        if (qres.size() != static_cast<size_t>(qcount))
+            throw std::runtime_error("output size changed between trials");
         for(int i=0; i<qcount; i++) {
             for(int j=0; j< EMBEDDING_DIM; j++){
                 qres[i][j] = 0.0f;
@@ -91,3 +101,4 @@ public:
         }
     }
 };
+#endif

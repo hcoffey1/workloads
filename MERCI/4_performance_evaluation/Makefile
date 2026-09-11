@@ -1,12 +1,18 @@
 CXX=g++
-CXXFLAGS=-I. -g -O3 -W -std=c++17 -lstdc++fs -fopenmp  -march=native -ffast-math
+CXXFLAGS=-I. -g -O3 -W -std=c++17 -fopenmp -march=native -ffast-math
+CPPFLAGS += -I../../common
+LDLIBS += -lstdc++fs -ldl -pthread
+HEADERS := $(wildcard src/*.h) $(wildcard ../../common/regent_regions/*.h)
+BINS := bin/eval_remap_only bin/eval_baseline bin/eval_merci
 
-all: eval_remap_only eval_baseline eval_merci
-eval_baseline: src/eval_baseline.cc
-	$(CXX) -o bin/eval_baseline $< $(CXXFLAGS)
-
-eval_merci: src/eval_merci.cc
-	$(CXX) -o bin/eval_merci $< $(CXXFLAGS)
-
-eval_remap_only: src/eval_remap_only.cc
-	$(CXX) -o bin/eval_remap_only $< $(CXXFLAGS)
+.PHONY: all eval_baseline eval_merci eval_remap_only test
+all: $(BINS)
+eval_baseline: bin/eval_baseline
+eval_merci: bin/eval_merci
+eval_remap_only: bin/eval_remap_only
+bin/%: src/%.cc $(HEADERS) | bin
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
+bin:
+	mkdir -p $@
+test: all
+	python3 tests/test_regions.py

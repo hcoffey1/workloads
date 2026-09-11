@@ -11,6 +11,11 @@ $ make all embedding_dim=${embeding_dimension}
 
 * `./bin/eval_baseline --dataset <dataset name> -c <# of threads> -r <# of repeats>`
 
+The baseline supports opt-in application-defined REGENT regions. See
+[MERCI zoning](../../docs/merci_regions.md) for allocation semantics,
+configuration, timing, and hardware-free checks. `make test` builds all three
+evaluation binaries and runs those checks without NUMA migration or PEBS.
+
 
 ## Eval Remapped
 

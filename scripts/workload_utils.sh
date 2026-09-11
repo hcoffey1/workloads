@@ -291,10 +291,31 @@ stop_mpstat() {
     set +x
 }
 
+# The perf_monitor and cpufreq_monitor binaries are built by the regent
+# Makefile (make perf_monitor cpufreq_monitor) in the regent checkout.  Locate
+# that checkout from REGENT_ROOT, else the directory holding the preloaded
+# library (HEMEMPOL), else the checkout beside this repository.
+regent_monitor() {
+    local name=$1 root
+    if [[ -n "${REGENT_ROOT:-}" ]]; then
+        root=$REGENT_ROOT
+    elif [[ -n "${HEMEMPOL:-}" ]]; then
+        root=$(dirname "$HEMEMPOL")
+    else
+        root="$CUR_PATH/../regent"
+    fi
+    if [[ ! -x "$root/$name" ]]; then
+        echo "WARNING: $name not found at $root/$name; skipping monitor (build it with make -C $root $name)" >&2
+        return 1
+    fi
+    echo "$root/$name"
+}
+
 # Depends on perf_monitor binary (built from perf_monitor.cpp via make)
 start_perf_monitor() {
-    local interval_ms="${1:-1000}"
-    sudo "/users/hjcoffey/working/regent/perf_monitor" "$interval_ms" > "$PERFMON" &
+    local interval_ms="${1:-1000}" monitor
+    monitor=$(regent_monitor perf_monitor) || return 0
+    sudo "$monitor" "$interval_ms" > "$PERFMON" &
     sleep 1
 }
 
@@ -306,8 +327,9 @@ stop_perf_monitor() {
 
 # Depends on cpufreq_monitor binary (built from cpufreq_monitor.cpp via make)
 start_cpufreq() {
-    local interval_ms="${1:-1000}"
-    "/users/hjcoffey/working/regent/cpufreq_monitor" "$interval_ms" > "$CPUFREQ" &
+    local interval_ms="${1:-1000}" monitor
+    monitor=$(regent_monitor cpufreq_monitor) || return 0
+    "$monitor" "$interval_ms" > "$CPUFREQ" &
     sleep 1
 }
 

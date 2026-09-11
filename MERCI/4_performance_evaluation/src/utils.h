@@ -1,27 +1,32 @@
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <chrono>
-#include <random>
+#ifndef MERCI_UTILS_H
+#define MERCI_UTILS_H
+
 #include <algorithm>
-#include <thread>
-#include <set>
-#include <bitset>
-#include <mutex>
-#include <sys/time.h>
-#include <unistd.h>
+#include <array>
 #include <atomic>
+#include <bitset>
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <functional>
+#include <iostream>
 #include <limits>
-#include <omp.h>
-#include <new>
 #include <malloc.h>
+#include <mutex>
+#include <new>
+#include <omp.h>
+#include <random>
+#include <set>
+#include <sstream>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <cassert>
-#include <cstring>
-#include <array>
+#include <sys/time.h>
+#include <thread>
+#include <unistd.h>
+#include <vector>
 
 using namespace std;
 using namespace std::chrono;
@@ -102,7 +107,7 @@ void __attribute__((optimize("O2"))) cacheFlush() {
         // vval += myf[i][0];
         vval += myf[i].at(0);
     }
-    delete p;
+    delete[] p;
 }
 
 
@@ -114,7 +119,9 @@ public:
     int total_query_feature_cnt; //total number of items in all queries (SOT)
     // int total_chunks;
 
-    QueryData(ifstream &testFile, bool baseline=false) : total_query_feature_cnt(0) {
+    QueryData(ifstream &testFile, bool baseline = false,
+              const uint32_t *shuffle_seed = nullptr)
+        : total_query_feature_cnt(0) {
 
         string line;
         while (getline(testFile, line)) { //read line by line
@@ -148,7 +155,13 @@ public:
         }
 
         //random_shuffle(query.begin(), query.end()); //random shuffle to scatter duplicate queries
-	std::shuffle(query.begin(), query.end(), std::mt19937(std::random_device()())); //random shuffle to scatter duplicate queries
+        std::shuffle(
+            query.begin(), query.end(),
+            std::mt19937(
+                shuffle_seed
+                    ? *shuffle_seed
+                    : std::random_device()())); // random shuffle to scatter
+                                                // duplicate queries
 
         cout << "================== QUERY INFO ==================" << endl;
         cout << "# of Queries                   : " << query.size() << endl;
@@ -156,7 +169,6 @@ public:
         cout << "Average Transaction Length     : " << (double)total_query_feature_cnt/query.size() << endl;
         cout << "================================================" << endl << endl;
     }
-
 
     //partition query by # of threads
     void partition(size_t core_count) {
@@ -180,15 +192,35 @@ public:
     }
 };
 
+inline void eval_event(const char *phase, int trial,
+                       steady_clock::time_point when) {
+    cout << "MERCI_EVENT {\"phase\":\"" << phase << "\",\"trial\":" << trial
+         << ",\"monotonic_ns\":"
+         << duration_cast<nanoseconds>(when.time_since_epoch()).count() << "}"
+         << endl;
+}
+
+struct EvalControl {
+    int warmups = 0;
+    bool trace = false;
+    std::function<void()> verify;
+};
 
 template <class T>
-void eval(T &ep, QueryData &qd, const size_t core_count, vector<thread> &t, int repeat, string name) {
+void eval(T &ep, QueryData &qd, const size_t core_count, vector<thread> &t,
+          int repeat, string name, const EvalControl *control = nullptr) {
     double total_time_accum = 0;
-    for(int k = 0; k <repeat; k++) {
+    for (int k = control ? -control->warmups : 0; k < repeat; k++) {
         double time_accum = 0;
+        if (control && control->trace)
+            eval_event("reset_begin", k, steady_clock::now());
         ep.init(qd.query.size());
         ep.setqbase(qd.partitioned_query);
+        if (control && control->trace)
+            eval_event("reset_end", k, steady_clock::now());
         cacheFlush();
+        if (control && control->trace)
+            eval_event("cache_flush_end", k, steady_clock::now());
         if(core_count > 0) {
             for(size_t i=0; i<core_count; i++) {
                 t[i] = thread(&T::process, &ep, ref(qd.partitioned_query[i]), i);
@@ -202,6 +234,12 @@ void eval(T &ep, QueryData &qd, const size_t core_count, vector<thread> &t, int 
         }
         else
             assert(false);
+        if (control && control->trace) {
+            eval_event("kernel_begin", k, ep.start);
+            eval_event("kernel_end", k, ep.end);
+        }
+        if (control && control->verify)
+            control->verify();
         time_accum += ((double)convertTime(ep.start, ep.end)) / 1000 / 1000;
 
         #if DEBUG
@@ -216,8 +254,10 @@ void eval(T &ep, QueryData &qd, const size_t core_count, vector<thread> &t, int 
         }
         cout << "Result : " << rsum << endl;
         #endif
-        cout << "REPEAT # " << k << " " << name << " Total time : " << time_accum << " ms" << endl;
-        total_time_accum += time_accum;
+        cout << (k < 0 ? "WARMUP # " : "REPEAT # ") << (k < 0 ? -k : k) << " "
+             << name << " Total time : " << time_accum << " ms" << endl;
+        if (k >= 0)
+            total_time_accum += time_accum;
     }
     cout << endl;
     cout << "\n========= " << name << " RESULT =========" << endl;
@@ -225,3 +265,4 @@ void eval(T &ep, QueryData &qd, const size_t core_count, vector<thread> &t, int 
     cout << "================================" << endl;
 }
 
+#endif

@@ -60,6 +60,7 @@ times.txt
 *.bin
 *.csv
 ogb/dataset
+setup_logs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
