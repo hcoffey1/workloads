@@ -63,3 +63,5 @@ ogb/dataset
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+setup_logs
