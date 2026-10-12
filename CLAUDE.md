@@ -13,7 +13,7 @@ Build all workloads from scratch:
 ./setup.sh
 ```
 
-This initializes submodules, installs system deps (`libnuma-dev libpmem-dev libaio-dev libssl-dev mpich`), applies patches from `patches/`, and builds each workload. To build an individual workload, follow the corresponding block in `setup.sh`.
+This initializes submodules, installs system deps (`libnuma-dev libpmem-dev libaio-dev libssl-dev mpich`), applies patches from `patches/`, and builds each workload. To build only specific workloads, name them: `./setup.sh liblinear graph500` (job names match the `build_<job>()` functions; prereqs are skipped unless `prereqs` is also named).
 
 ## Running Experiments
 
