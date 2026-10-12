@@ -6,6 +6,12 @@
 # first, then each workload is built as a concurrent background job. Per-job
 # status and timing are collected and written to setup_summary.log.
 #
+# Usage:
+#   ./setup.sh                   run prereqs + every build job
+#   ./setup.sh <job> [job...]    run only the named jobs, e.g. `./setup.sh liblinear graph500`.
+#                                prereqs are skipped unless `prereqs` is named.
+#                                Job names match build_<job>() (see the run_job list at the bottom).
+#
 # Tunables (env overrides):
 #   MAX_PARALLEL  max number of build jobs to run at once   (default 4)
 #   J             -j parallelism passed to each make        (default 4)
@@ -22,6 +28,9 @@ MAX_PARALLEL="${MAX_PARALLEL:-8}"
 J="${J:-16}"
 LOGDIR="${LOGDIR:-$ROOT/setup_logs}"
 SUMMARY="${SUMMARY:-$ROOT/setup_summary.log}"
+
+# Optional job filter (positional args). Empty = run everything.
+declare -a JOB_FILTER=("$@")
 
 mkdir -p "$LOGDIR"
 rm -f "$LOGDIR"/*.status   # clear stale results from a previous run
@@ -74,9 +83,19 @@ throttle() {
     done
 }
 
+# job_selected <name> - true if no filter was given or <name> is in it.
+job_selected() {
+    (( ${#JOB_FILTER[@]} == 0 )) && return 0
+    local j
+    for j in "${JOB_FILTER[@]}"; do [[ "$j" == "$1" ]] && return 0; done
+    return 1
+}
+
 # run_job <name> <cmd...> - launch a build concurrently, respecting MAX_PARALLEL.
+# Jobs excluded by the filter are not launched and don't appear in the summary.
 run_job() {
     local name="$1"
+    job_selected "$name" || return 0
     JOB_NAMES+=("$name")
     throttle
     echo ">> launching: $name (log: $LOGDIR/${name}.log)"
@@ -152,7 +171,6 @@ build_gapbs() {
 
 build_graph500() {
     cd "$ROOT/graph500"
-    git checkout master
     cp make-incs/make.inc-gcc make.inc
     #Change makefile gcc version and enable openmp
     sed -i -e 's/^CC = gcc-4.6/CC = gcc/' \
@@ -355,13 +373,26 @@ write_summary() {
 # Main
 # ----------------------------------------------------------------------------
 
+# Validate the job filter now that the build_* functions are defined.
+for _job in "${JOB_FILTER[@]}"; do
+    if [[ "$_job" != prereqs ]] && ! declare -F "build_$_job" >/dev/null; then
+        echo "setup.sh: unknown job '$_job'. Valid jobs: prereqs" \
+            $(declare -F | awk '$3 ~ /^build_/ {sub(/^build_/, "", $3); print $3}') >&2
+        exit 2
+    fi
+done
+
 echo "setup.sh: MAX_PARALLEL=$MAX_PARALLEL  J=$J  LOGDIR=$LOGDIR"
+(( ${#JOB_FILTER[@]} )) && echo "setup.sh: job filter: ${JOB_FILTER[*]}"
 SETUP_START=$(date +%s)
 
 # Prerequisites run serially since the parallel builds depend on them.
-echo ">> prerequisites (submodules, apt packages, conda env)"
-JOB_NAMES+=("prereqs")
-_exec_job prereqs prereqs || echo "WARNING: prereqs reported errors; continuing with builds" >&2
+# With a job filter, they only run if `prereqs` is explicitly named.
+if job_selected prereqs; then
+    echo ">> prerequisites (submodules, apt packages, conda env)"
+    JOB_NAMES+=("prereqs")
+    _exec_job prereqs prereqs || echo "WARNING: prereqs reported errors; continuing with builds" >&2
+fi
 
 # Concurrent per-workload builds.
 run_job cipp       build_cipp

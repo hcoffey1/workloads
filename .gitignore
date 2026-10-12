@@ -64,3 +64,5 @@ setup_logs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+setup_logs
