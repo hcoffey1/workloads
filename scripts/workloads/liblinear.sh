@@ -5,7 +5,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 
 #TODO: Where to get dataset?
 config_liblinear(){
-    num_threads=16
+    num_threads=${LIBLINEAR_THREADS:-16}
     dataset=$CUR_PATH/liblinear-2.47/kdd12
 }
 
