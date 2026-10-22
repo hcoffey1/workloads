@@ -20,6 +20,7 @@ declare -g SUITE WORKLOAD CONFIG_FILE INSTRUMENT OUTPUT_DIR ITERATIONS
 declare -g SAMPLING_RATE AGG_RATE MIN_NUM_DAMO MAX_NUM_DAMO
 declare -g DAMON_AUTO_ACCESS_BP DAMON_AUTO_AGGRS
 declare -g hemem_policy workload_pid NUMASTAT_PID USE_CGROUP
+declare -g WORKLOAD_RC=0   # last non-zero workload exit status; run.sh exits with it
 
 # ==============================================================================
 # UTILITY FUNCTIONS
@@ -404,6 +405,17 @@ get_invocation_labels() {
 wait_for_workload() {
     echo "Waiting for workload to complete (PID: $workload_pid)..."
     tail --pid=$workload_pid -f /dev/null
+
+    # Only set by run_workload_standard; suites with custom launches are not checked.
+    if [[ -n "${WORKLOAD_LAUNCHER_PID:-}" ]]; then
+        local rc=0
+        wait "$WORKLOAD_LAUNCHER_PID" || rc=$?
+        WORKLOAD_LAUNCHER_PID=""
+        if (( rc != 0 )); then
+            echo "ERROR: workload exited with status $rc (see $STDERR)" >&2
+            WORKLOAD_RC=$rc
+        fi
+    fi
 }
 
 cleanup_workload() {
@@ -667,6 +679,10 @@ main() {
         fi
     done
 
+    if (( WORKLOAD_RC != 0 )); then
+        echo "=== Experiment FAILED: workload exited with status $WORKLOAD_RC ===" >&2
+        exit "$WORKLOAD_RC"
+    fi
     echo "=== Experiment completed successfully ==="
 }
 

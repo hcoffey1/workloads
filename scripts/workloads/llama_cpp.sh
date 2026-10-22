@@ -33,6 +33,7 @@ config_llama_cpp() {
     LLAMA_REPETITIONS="${LLAMA_REPETITIONS:-5}"
     LLAMA_N_GPU_LAYERS="${LLAMA_N_GPU_LAYERS:-0}"   # 0 = CPU-only
     LLAMA_MMAP="${LLAMA_MMAP:-0}"                   # 0 = disable mmap (force read into RAM)
+    LLAMA_LOAD_MODE=none; [[ "$LLAMA_MMAP" == 1 ]] && LLAMA_LOAD_MODE=mmap   # passed as -lm (replaced -mmp/--mmap)
 
     # ---- llama-bench specific ----
     LLAMA_N_PROMPT="${LLAMA_N_PROMPT:-512}"          # prompt (prefill) tokens
@@ -132,7 +133,7 @@ run_llama_cpp() {
             args="$args -b $LLAMA_BATCH_SIZE"
             args="$args -ub $LLAMA_UBATCH_SIZE"
             args="$args -ngl $LLAMA_N_GPU_LAYERS"
-            args="$args -mmp $LLAMA_MMAP"
+            args="$args -lm $LLAMA_LOAD_MODE"
             args="$args -o $LLAMA_OUTPUT_FMT"
             args="$args --progress"
             ;;
@@ -142,7 +143,7 @@ run_llama_cpp() {
             args="$args -ngl $LLAMA_N_GPU_LAYERS"
             args="$args -c $LLAMA_CTX_SIZE"
             args="$args -n $LLAMA_N_GEN"
-            args="$args --mmap $LLAMA_MMAP"
+            args="$args -lm $LLAMA_LOAD_MODE"
             args="$args -p \"$LLAMA_PROMPT\""
             ;;
         llama-perplexity)
@@ -221,7 +222,7 @@ _run_llama_server() {
     server_args="$server_args -ngl $LLAMA_N_GPU_LAYERS"
     server_args="$server_args --host $LLAMA_SERVER_HOST"
     server_args="$server_args --port $LLAMA_SERVER_PORT"
-    server_args="$server_args --no-mmap"
+    server_args="$server_args -lm $LLAMA_LOAD_MODE"
     server_args="$server_args --metrics"
 
     # ---- Generate standard filenames ----

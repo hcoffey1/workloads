@@ -211,6 +211,8 @@ run_workload_standard() {
             "$WRAPPER" \
             1> "$STDOUT" 2> "$STDERR" &
     fi
+    # Child of run.sh; wait_for_workload reaps it for the workload's exit code (time passes it through)
+    WORKLOAD_LAUNCHER_PID=$!
 
     # wait until wrapper has written pidfile (tiny loop is fine)
     local timeout=10  # 10 second timeout
