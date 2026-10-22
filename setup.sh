@@ -120,12 +120,14 @@ prereqs() {
     sudo apt-get update
     # intel-mkl (Faiss BLAS backend) prompts a license UI that breaks headless
     # installs; force noninteractive + keep existing config files. openjdk is for
-    # the renaissance Java benchmarks, python3.10-venv/-dev for ANN-SoLo.
+    # the renaissance Java benchmarks, python3.10-venv/-dev for ANN-SoLo,
+    # libevent-dev/maven for memcached (server build + YCSB client).
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
         libnuma-dev libpmem-dev libaio-dev libssl-dev mpich intel-mkl \
         openjdk-21-jdk python3.10-venv python3.10-dev htop \
+        libevent-dev maven \
         autoconf automake libtool \
         libdb-dev libdb++-dev   # Silo (autotools + Berkeley DB db_cxx.h)
 

@@ -208,7 +208,9 @@ config_minimap2(){
         echo "Subsampling: disabled (using all reads)"
     fi
     echo "=============================="
-}build_minimap2(){
+}
+
+build_minimap2(){
     local workload=$1
 
     echo "Building minimap2..."
@@ -293,7 +295,9 @@ run_minimap2(){
     run_workload_standard
     
     start_bwmon
-}run_strace_minimap2(){
+}
+
+run_strace_minimap2(){
     local workload=$1
 
     echo "Running minimap2 with strace..."

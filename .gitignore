@@ -65,3 +65,5 @@ ogb/dataset
 .ipynb_checkpoints
 
 setup_logs
+smoke_results/
+smoke_results.out
