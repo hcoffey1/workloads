@@ -191,7 +191,7 @@ build_liblinear() {
     make -j"$J"
 }
 
-# MoE model for llama.cpp (run with LLAMA_MODEL=<printed path>). llama.cpp/models/*
+# MoE model + WildChat replay prompts for llama.cpp (-w qwen). llama.cpp/models/*
 # is gitignored by the submodule. wget -c resumes partial files and no-ops on complete ones.
 build_llama_models() {
     local quant="${QWEN_MOE_QUANT:-Q8_0}"
@@ -200,6 +200,16 @@ build_llama_models() {
     wget -c -O "$ROOT/llama.cpp/models/$file" \
         "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/$file"
     echo "model ready: $ROOT/llama.cpp/models/$file"
+
+    # Replay prompts for -w qwen: one WildChat-1M shard (ODC-BY, ungated) -> JSONL
+    # pool. Needs pyarrow from the dataVis env that prereqs provisions.
+    local wc="$ROOT/llama.cpp/models/wildchat"
+    mkdir -p "$wc"
+    wget -c -O "$wc/train-00000-of-00014.parquet" \
+        "https://huggingface.co/datasets/allenai/WildChat-1M/resolve/main/data/train-00000-of-00014.parquet"
+    "${CONDA_HOME:-$HOME/miniconda3}/bin/conda" run -n dataVis python -I \
+        "$ROOT/scripts/workloads/wildchat_prompts.py" \
+        "$wc/train-00000-of-00014.parquet" "$wc/prompts.jsonl"
 }
 
 build_merci() {

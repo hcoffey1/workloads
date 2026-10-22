@@ -14,12 +14,27 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 #   llama-server / llama_server – multi-session serving benchmark
 #       (llama-server starts the C++ server; a Python client drives load.
 #        workload_pid = server PID, so PEBS instruments the right binary.)
+#   qwen                     – single-user replay of WildChat prompts on
+#       Qwen3-30B-A3B (MoE) via llama-server; per-request server timings land in
+#       qwen_replay_iter<N>.jsonl. Data: ./setup.sh llama_models
 # =============================================================================
 
 # ---- internal state for llama-server mode ----
 _LLAMA_SERVER_BENCH_PID=""
 
 config_llama_cpp() {
+    # ---- qwen replay defaults (args: config_file, workload) ----
+    if [[ "${2:-}" == "qwen" ]]; then
+        LLAMA_MODEL="${LLAMA_MODEL:-$CUR_PATH/llama.cpp/models/Qwen3-30B-A3B-Q8_0.gguf}"
+        LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-8192}"   # prompts are capped at ~1.5K tokens
+    fi
+    LLAMA_REPLAY_PROMPTS="${LLAMA_REPLAY_PROMPTS:-$CUR_PATH/llama.cpp/models/wildchat/prompts.jsonl}"
+    LLAMA_REPLAY_N="${LLAMA_REPLAY_N:-20}"                   # first N prompts of the fixed pool
+    LLAMA_THINKING="${LLAMA_THINKING:-0}"                   # 1 = Qwen3 thinking mode (-rea on)
+    # Per-request cap, high enough that most replies end on their own (finish_reason=stop)
+    local max_tokens_default=1024; [[ "$LLAMA_THINKING" == 1 ]] && max_tokens_default=4096
+    LLAMA_REPLAY_MAX_TOKENS="${LLAMA_REPLAY_MAX_TOKENS:-$max_tokens_default}"
+
     # ---- Model ----
     # Default model: TinyLlama 1.1B Q4_K_M (~670MB) – good for quick testing.
     # Override LLAMA_MODEL / LLAMA_MODEL_URL for larger models, e.g.:
@@ -65,6 +80,7 @@ config_llama_cpp() {
     LLAMA_SERVER_ROUNDS="${LLAMA_SERVER_ROUNDS:-3}"
     LLAMA_SERVER_PROMPT_TOKENS="${LLAMA_SERVER_PROMPT_TOKENS:-128}"
     LLAMA_SERVER_GEN_TOKENS="${LLAMA_SERVER_GEN_TOKENS:-64}"
+    LLAMA_SERVER_READY_TIMEOUT="${LLAMA_SERVER_READY_TIMEOUT:-600}"  # s; large models load slowly
 }
 
 build_llama_cpp() {
@@ -118,9 +134,12 @@ run_llama_cpp() {
     # Normalize underscore to hyphen for binary lookup
     local workload_normalized="${workload//_/-}"
 
-    # Dispatch llama-server to its own handler
+    # Dispatch llama-server (and the qwen replay built on it) to its own handler
     if [[ "$workload_normalized" == "llama-server" ]]; then
         _run_llama_server
+        return $?
+    elif [[ "$workload" == "qwen" ]]; then
+        _run_llama_server replay
         return $?
     fi
 
@@ -213,9 +232,20 @@ run_strace_llama_cpp() {
 # =============================================================================
 # llama-server mode: internal handler
 # =============================================================================
+# Arg: "replay" = single-user qwen prompt replay; default = multi-session load.
 _run_llama_server() {
+    local mode="${1:-load}"
     local server_bin="$CUR_PATH/llama.cpp/build/bin/llama-server"
     local bench_script="$CUR_PATH/scripts/workloads/vllm_bench_client.py"
+    local parallel="$LLAMA_SERVER_PARALLEL" n_predict="$LLAMA_SERVER_N_PREDICT" name="llama_server"
+    if [[ "$mode" == "replay" ]]; then
+        bench_script="$CUR_PATH/scripts/workloads/llama_replay_client.py"
+        parallel=1 n_predict="$LLAMA_REPLAY_MAX_TOKENS" name="qwen"
+        if [[ ! -f "$LLAMA_REPLAY_PROMPTS" ]]; then
+            echo "ERROR: replay prompts not found at $LLAMA_REPLAY_PROMPTS (run ./setup.sh llama_models)"
+            return 1
+        fi
+    fi
 
     if [[ ! -x "$server_bin" ]]; then
         echo "ERROR: llama-server binary not found at $server_bin"
@@ -227,8 +257,12 @@ _run_llama_server() {
     server_args="$server_args -m $LLAMA_MODEL"
     server_args="$server_args -t $LLAMA_THREADS"
     server_args="$server_args -c $LLAMA_CTX_SIZE"
-    server_args="$server_args -np $LLAMA_SERVER_PARALLEL"
-    server_args="$server_args -n $LLAMA_SERVER_N_PREDICT"
+    server_args="$server_args -np $parallel"
+    server_args="$server_args -n $n_predict"
+    if [[ "$mode" == "replay" ]]; then
+        local rea=off; [[ "$LLAMA_THINKING" == 1 ]] && rea=on
+        server_args="$server_args -rea $rea"
+    fi
     server_args="$server_args -ngl $LLAMA_N_GPU_LAYERS"
     server_args="$server_args --host $LLAMA_SERVER_HOST"
     server_args="$server_args --port $LLAMA_SERVER_PORT"
@@ -236,15 +270,15 @@ _run_llama_server() {
     server_args="$server_args --metrics"
 
     # ---- Generate standard filenames ----
-    generate_workload_filenames "llama_server"
+    generate_workload_filenames "$name"
 
-    local server_stderr="${OUTPUT_DIR}/llama_server_stderr.txt"
+    local server_stderr="${OUTPUT_DIR}/${name}_server_stderr.txt"
 
     # ---- Start llama-server via wrapper (LD_PRELOAD + PEBS track this PID) ----
     create_workload_wrapper "$WRAPPER" "$PIDFILE" \
         "$server_bin" "$server_args" "export USE_HUGETLB=0"
 
-    echo "Starting llama-server (${LLAMA_SERVER_PARALLEL} parallel slots)..."
+    echo "Starting llama-server (${parallel} parallel slots)..."
 
     set +e
     sudo numactl $(workload_numa_args) \
@@ -281,7 +315,7 @@ _run_llama_server() {
     echo "Waiting for server to become ready..."
     local ready=0
     local attempt=0
-    while [ $attempt -lt 120 ]; do
+    while [ $attempt -lt "$LLAMA_SERVER_READY_TIMEOUT" ]; do
         if curl -sf "http://${LLAMA_SERVER_HOST}:${LLAMA_SERVER_PORT}/health" >/dev/null 2>&1; then
             ready=1
             break
@@ -290,7 +324,7 @@ _run_llama_server() {
         attempt=$((attempt + 1))
     done
     if [[ $ready -ne 1 ]]; then
-        echo "ERROR: llama-server did not become ready within 120 seconds"
+        echo "ERROR: llama-server did not become ready within ${LLAMA_SERVER_READY_TIMEOUT} seconds"
         echo "Server stderr:"
         tail -20 "$server_stderr"
         return 1
@@ -301,16 +335,23 @@ _run_llama_server() {
     local bench_args=""
     bench_args="$bench_args --host $LLAMA_SERVER_HOST"
     bench_args="$bench_args --port $LLAMA_SERVER_PORT"
-    bench_args="$bench_args --clients $LLAMA_SERVER_CLIENTS"
-    bench_args="$bench_args --rounds $LLAMA_SERVER_ROUNDS"
-    bench_args="$bench_args --prompt-tokens $LLAMA_SERVER_PROMPT_TOKENS"
-    bench_args="$bench_args --gen-tokens $LLAMA_SERVER_GEN_TOKENS"
-
-    local json_output="${OUTPUT_DIR}/llama_server_bench_iter${CURRENT_ITERATION:-0}.json"
-    local bench_stdout="${OUTPUT_DIR}/llama_server_bench_stdout.txt"
-    local bench_stderr="${OUTPUT_DIR}/llama_server_bench_stderr.txt"
-
-    echo "Launching benchmark client ($LLAMA_SERVER_CLIENTS concurrent, $LLAMA_SERVER_ROUNDS rounds)..."
+    local json_output bench_stdout="${OUTPUT_DIR}/${name}_bench_stdout.txt"
+    local bench_stderr="${OUTPUT_DIR}/${name}_bench_stderr.txt"
+    if [[ "$mode" == "replay" ]]; then
+        json_output="${OUTPUT_DIR}/qwen_replay_iter${CURRENT_ITERATION:-0}.jsonl"
+        bench_args="$bench_args --prompts $LLAMA_REPLAY_PROMPTS"
+        bench_args="$bench_args --n $LLAMA_REPLAY_N"
+        bench_args="$bench_args --max-tokens $LLAMA_REPLAY_MAX_TOKENS"
+        bench_args="$bench_args --out $json_output"
+        echo "Launching replay client ($LLAMA_REPLAY_N prompts, thinking=$LLAMA_THINKING)..."
+    else
+        json_output="${OUTPUT_DIR}/llama_server_bench_iter${CURRENT_ITERATION:-0}.json"
+        bench_args="$bench_args --clients $LLAMA_SERVER_CLIENTS"
+        bench_args="$bench_args --rounds $LLAMA_SERVER_ROUNDS"
+        bench_args="$bench_args --prompt-tokens $LLAMA_SERVER_PROMPT_TOKENS"
+        bench_args="$bench_args --gen-tokens $LLAMA_SERVER_GEN_TOKENS"
+        echo "Launching benchmark client ($LLAMA_SERVER_CLIENTS concurrent, $LLAMA_SERVER_ROUNDS rounds)..."
+    fi
     VLLM_BENCH_JSON_OUTPUT="$json_output" \
         python3 "$bench_script" $bench_args \
         1> "$bench_stdout" 2> "$bench_stderr" &
@@ -321,9 +362,14 @@ _run_llama_server() {
 
     # ---- Wait for benchmark client to finish ----
     echo "Waiting for benchmark client to finish..."
-    wait $_LLAMA_SERVER_BENCH_PID 2>/dev/null || true
+    local client_rc=0
+    wait $_LLAMA_SERVER_BENCH_PID 2>/dev/null || client_rc=$?
     _LLAMA_SERVER_BENCH_PID=""
-    echo "Benchmark client finished."
+    echo "Benchmark client finished (status $client_rc)."
+    if (( client_rc != 0 )); then
+        echo "ERROR: benchmark client failed (see $bench_stderr)" >&2
+        WORKLOAD_RC=$client_rc   # run.sh exits with this; the server itself is killed on purpose
+    fi
 
     if [[ -f "$bench_stdout" ]]; then
         echo "--- Benchmark Results ---"

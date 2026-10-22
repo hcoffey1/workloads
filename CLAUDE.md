@@ -85,7 +85,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `npb-cpp` | varies | NAS Parallel Benchmarks |
 | `cloverleaf` | `cloverleaf` | |
 | `minimap2` | `minimap2` | Requires genome data |
-| `llama_cpp` | `llama_cpp` | Requires model weights. Default TinyLlama auto-downloads; MoE model Qwen3-30B-A3B (Q8_0, 32.5GB) via `./setup.sh llama_models`, then `LLAMA_MODEL=$PWD/llama.cpp/models/Qwen3-30B-A3B-Q8_0.gguf` (`QWEN_MOE_QUANT` picks another quant). |
+| `llama_cpp` | `llama_cpp`, `llama-cli`, `llama-server`, `qwen` | Requires model weights. Default TinyLlama auto-downloads. `qwen`: single-user replay of WildChat-1M prompts on Qwen3-30B-A3B (MoE, Q8_0 32.5GB) via llama-server; model + prompts from `./setup.sh llama_models`. Tunables `LLAMA_REPLAY_N` (20), `LLAMA_THINKING` (0/1), `LLAMA_REPLAY_MAX_TOKENS` (1024, or 4096 with thinking); per-request server timings in `qwen_replay_iter<N>.jsonl`. Model loads in ~3 min. |
 | `dcperf` | varies | Meta DCPerf suite |
 | `memcached` | `memcached` | |
 | `cachelib` | `cachelib` | |
