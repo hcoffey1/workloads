@@ -20,6 +20,7 @@
 #   SPEC_SRC      path to a SPEC CPU2017 install            (default /proj/instrument-PG0/spec)
 #   BUILD_SPEC2026=0  skip the (heavy) SPEC CPU2026 build
 #   SPEC2026_ISO  path to the CPU2026 ISO   (default /proj/instrument-PG0/cpu2026-1.0.1.iso)
+#   QWEN_MOE_QUANT  quant of the Qwen3-30B-A3B GGUF fetched by llama_models (default Q8_0, 32.5GB)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT" || exit 1
@@ -188,6 +189,17 @@ build_liblinear() {
         unxz kdd12.xz   # removes the .xz on success
     fi
     make -j"$J"
+}
+
+# MoE model for llama.cpp (run with LLAMA_MODEL=<printed path>). llama.cpp/models/*
+# is gitignored by the submodule. wget -c resumes partial files and no-ops on complete ones.
+build_llama_models() {
+    local quant="${QWEN_MOE_QUANT:-Q8_0}"
+    local file="Qwen3-30B-A3B-${quant}.gguf"
+    mkdir -p "$ROOT/llama.cpp/models"
+    wget -c -O "$ROOT/llama.cpp/models/$file" \
+        "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/$file"
+    echo "model ready: $ROOT/llama.cpp/models/$file"
 }
 
 build_merci() {
@@ -403,6 +415,7 @@ run_job flexkvs    build_flexkvs
 run_job gapbs      build_gapbs
 run_job graph500   build_graph500
 run_job liblinear  build_liblinear
+run_job llama_models build_llama_models
 run_job merci      build_merci
 run_job silo       build_silo
 run_job xsbench    build_xsbench

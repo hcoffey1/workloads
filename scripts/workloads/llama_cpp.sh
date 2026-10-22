@@ -25,7 +25,14 @@ config_llama_cpp() {
     # Override LLAMA_MODEL / LLAMA_MODEL_URL for larger models, e.g.:
     #   LLAMA_MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-GGUF/resolve/main/llama-2-7b.Q4_K_M.gguf"
     #   LLAMA_MODEL="$CUR_PATH/llama.cpp/models/llama-2-7b.Q4_K_M.gguf"
-    LLAMA_MODEL_URL="${LLAMA_MODEL_URL:-https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf}"
+    # MoE model (fetch with `./setup.sh llama_models`):
+    #   LLAMA_MODEL="$CUR_PATH/llama.cpp/models/Qwen3-30B-A3B-Q8_0.gguf"
+    # The TinyLlama URL only defaults with the default path, so an overridden
+    # LLAMA_MODEL is never auto-filled with the wrong weights.
+    if [[ -z "${LLAMA_MODEL:-}" ]]; then
+        LLAMA_MODEL_URL="${LLAMA_MODEL_URL:-https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf}"
+    fi
+    LLAMA_MODEL_URL="${LLAMA_MODEL_URL:-}"
     LLAMA_MODEL="${LLAMA_MODEL:-$CUR_PATH/llama.cpp/models/tinyllama-1.1b-q4km.gguf}"
 
     # ---- General ----
@@ -65,7 +72,10 @@ build_llama_cpp() {
     local build_dir="$src_dir/build"
 
     # ---- Download model if it doesn't exist ----
-    if [[ ! -f "$LLAMA_MODEL" ]]; then
+    if [[ ! -f "$LLAMA_MODEL" && -z "$LLAMA_MODEL_URL" ]]; then
+        echo "ERROR: Model not found at $LLAMA_MODEL and LLAMA_MODEL_URL is unset (for the MoE model run ./setup.sh llama_models)"
+        return 1
+    elif [[ ! -f "$LLAMA_MODEL" ]]; then
         echo "Model not found at $LLAMA_MODEL – downloading..."
         local model_dir
         model_dir="$(dirname "$LLAMA_MODEL")"

@@ -85,7 +85,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `npb-cpp` | varies | NAS Parallel Benchmarks |
 | `cloverleaf` | `cloverleaf` | |
 | `minimap2` | `minimap2` | Requires genome data |
-| `llama_cpp` | `llama_cpp` | Requires model weights |
+| `llama_cpp` | `llama_cpp` | Requires model weights. Default TinyLlama auto-downloads; MoE model Qwen3-30B-A3B (Q8_0, 32.5GB) via `./setup.sh llama_models`, then `LLAMA_MODEL=$PWD/llama.cpp/models/Qwen3-30B-A3B-Q8_0.gguf` (`QWEN_MOE_QUANT` picks another quant). |
 | `dcperf` | varies | Meta DCPerf suite |
 | `memcached` | `memcached` | |
 | `cachelib` | `cachelib` | |
