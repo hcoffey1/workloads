@@ -17,6 +17,10 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 #   qwen                     – single-user replay of WildChat prompts on
 #       Qwen3-30B-A3B (MoE) via llama-server; per-request server timings land in
 #       qwen_replay_iter<N>.jsonl. Data: ./setup.sh llama_models
+#   mixtral                  – the same replay on Mixtral-8x7B-Instruct (8 experts,
+#       top-2), Q4_K_M from worthdoing/Mixtral-8x7B-Instruct-v0.1-GGUF (older
+#       GGUFs use split per-expert tensors this llama.cpp no longer loads).
+#       Repacking is off by default so the weights keep their GGUF layout.
 # =============================================================================
 
 # ---- internal state for llama-server mode ----
@@ -26,13 +30,20 @@ config_llama_cpp() {
     # ---- qwen replay defaults (args: config_file, workload) ----
     if [[ "${2:-}" == "qwen" ]]; then
         LLAMA_MODEL="${LLAMA_MODEL:-$CUR_PATH/llama.cpp/models/Qwen3-30B-A3B-Q8_0.gguf}"
-        LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-8192}"   # prompts are capped at ~1.5K tokens
+        LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-16384}"  # ~1.5K-token prompts + 8192-token thinking replies
+    elif [[ "${2:-}" == "mixtral" ]]; then
+        LLAMA_MODEL="${LLAMA_MODEL:-$CUR_PATH/llama.cpp/models/Mixtral-8x7B-Instruct-v0.1-Q4_K_M.gguf}"
+        LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-8192}"
+        # Q4_K is repacked into an interleaved buffer on AVX2; keep the file layout for expert mapping
+        LLAMA_REPACK="${LLAMA_REPACK:-0}"
     fi
+    LLAMA_REPACK="${LLAMA_REPACK:-1}"                       # 0 = pass --no-repack
     LLAMA_REPLAY_PROMPTS="${LLAMA_REPLAY_PROMPTS:-$CUR_PATH/llama.cpp/models/wildchat/prompts.jsonl}"
     LLAMA_REPLAY_N="${LLAMA_REPLAY_N:-20}"                   # first N prompts of the fixed pool
     LLAMA_THINKING="${LLAMA_THINKING:-0}"                   # 1 = Qwen3 thinking mode (-rea on)
+    LLAMA_ROUTER_LOG="${LLAMA_ROUTER_LOG:-0}"               # 1 = log MoE router picks to <name>_router.bin
     # Per-request cap, high enough that most replies end on their own (finish_reason=stop)
-    local max_tokens_default=1024; [[ "$LLAMA_THINKING" == 1 ]] && max_tokens_default=4096
+    local max_tokens_default=2048; [[ "$LLAMA_THINKING" == 1 ]] && max_tokens_default=8192
     LLAMA_REPLAY_MAX_TOKENS="${LLAMA_REPLAY_MAX_TOKENS:-$max_tokens_default}"
 
     # ---- Model ----
@@ -81,6 +92,7 @@ config_llama_cpp() {
     LLAMA_SERVER_PROMPT_TOKENS="${LLAMA_SERVER_PROMPT_TOKENS:-128}"
     LLAMA_SERVER_GEN_TOKENS="${LLAMA_SERVER_GEN_TOKENS:-64}"
     LLAMA_SERVER_READY_TIMEOUT="${LLAMA_SERVER_READY_TIMEOUT:-600}"  # s; large models load slowly
+    LLAMA_SERVER_STOP_TIMEOUT="${LLAMA_SERVER_STOP_TIMEOUT:-120}"    # s; grace before SIGKILL
 }
 
 build_llama_cpp() {
@@ -138,8 +150,8 @@ run_llama_cpp() {
     if [[ "$workload_normalized" == "llama-server" ]]; then
         _run_llama_server
         return $?
-    elif [[ "$workload" == "qwen" ]]; then
-        _run_llama_server replay
+    elif [[ "$workload" == "qwen" || "$workload" == "mixtral" ]]; then
+        _run_llama_server replay "$workload"
         return $?
     fi
 
@@ -232,15 +244,15 @@ run_strace_llama_cpp() {
 # =============================================================================
 # llama-server mode: internal handler
 # =============================================================================
-# Arg: "replay" = single-user qwen prompt replay; default = multi-session load.
+# Args: "replay" = single-user prompt replay (default = multi-session load); replay name (qwen|mixtral).
 _run_llama_server() {
-    local mode="${1:-load}"
+    local mode="${1:-load}" replay_name="${2:-qwen}"
     local server_bin="$CUR_PATH/llama.cpp/build/bin/llama-server"
     local bench_script="$CUR_PATH/scripts/workloads/vllm_bench_client.py"
     local parallel="$LLAMA_SERVER_PARALLEL" n_predict="$LLAMA_SERVER_N_PREDICT" name="llama_server"
     if [[ "$mode" == "replay" ]]; then
         bench_script="$CUR_PATH/scripts/workloads/llama_replay_client.py"
-        parallel=1 n_predict="$LLAMA_REPLAY_MAX_TOKENS" name="qwen"
+        parallel=1 n_predict="$LLAMA_REPLAY_MAX_TOKENS" name="$replay_name"
         if [[ ! -f "$LLAMA_REPLAY_PROMPTS" ]]; then
             echo "ERROR: replay prompts not found at $LLAMA_REPLAY_PROMPTS (run ./setup.sh llama_models)"
             return 1
@@ -267,6 +279,7 @@ _run_llama_server() {
     server_args="$server_args --host $LLAMA_SERVER_HOST"
     server_args="$server_args --port $LLAMA_SERVER_PORT"
     server_args="$server_args -lm $LLAMA_LOAD_MODE"
+    [[ "$LLAMA_REPACK" == 0 ]] && server_args="$server_args --no-repack"
     server_args="$server_args --metrics"
 
     # ---- Generate standard filenames ----
@@ -275,8 +288,11 @@ _run_llama_server() {
     local server_stderr="${OUTPUT_DIR}/${name}_server_stderr.txt"
 
     # ---- Start llama-server via wrapper (LD_PRELOAD + PEBS track this PID) ----
+    local server_env="export USE_HUGETLB=0"
+    # Router log (llama-server patch): per layer and batch, the experts chosen for each token.
+    [[ "$LLAMA_ROUTER_LOG" == 1 ]] && server_env="$server_env; export LLAMA_ROUTER_LOG=${OUTPUT_DIR}/${name}_router.bin"
     create_workload_wrapper "$WRAPPER" "$PIDFILE" \
-        "$server_bin" "$server_args" "export USE_HUGETLB=0"
+        "$server_bin" "$server_args" "$server_env"
 
     echo "Starting llama-server (${parallel} parallel slots)..."
 
@@ -338,7 +354,7 @@ _run_llama_server() {
     local json_output bench_stdout="${OUTPUT_DIR}/${name}_bench_stdout.txt"
     local bench_stderr="${OUTPUT_DIR}/${name}_bench_stderr.txt"
     if [[ "$mode" == "replay" ]]; then
-        json_output="${OUTPUT_DIR}/qwen_replay_iter${CURRENT_ITERATION:-0}.jsonl"
+        json_output="${OUTPUT_DIR}/${name}_replay_iter${CURRENT_ITERATION:-0}.jsonl"
         bench_args="$bench_args --prompts $LLAMA_REPLAY_PROMPTS"
         bench_args="$bench_args --n $LLAMA_REPLAY_N"
         bench_args="$bench_args --max-tokens $LLAMA_REPLAY_MAX_TOKENS"
@@ -380,8 +396,16 @@ _run_llama_server() {
     # Kill the server now that the benchmark is done
     echo "Stopping llama-server (PID $workload_pid)..."
     sudo kill "$workload_pid" 2>/dev/null || true
-    sleep 1
-    sudo kill -9 "$workload_pid" 2>/dev/null || true
+    # Let the server exit normally: the tiering lib finalizes its telemetry in an atexit hook.
+    local waited=0
+    while sudo kill -0 "$workload_pid" 2>/dev/null && (( waited < LLAMA_SERVER_STOP_TIMEOUT )); do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if sudo kill -0 "$workload_pid" 2>/dev/null; then
+        echo "WARNING: llama-server still alive after ${LLAMA_SERVER_STOP_TIMEOUT}s; sending SIGKILL" >&2
+        sudo kill -9 "$workload_pid" 2>/dev/null || true
+    fi
 }
 
 clean_llama_cpp() {

@@ -210,6 +210,19 @@ build_llama_models() {
     "${CONDA_HOME:-$HOME/miniconda3}/bin/conda" run -n dataVis python -I \
         "$ROOT/scripts/workloads/wildchat_prompts.py" \
         "$wc/train-00000-of-00014.parquet" "$wc/prompts.jsonl"
+    # Domain-blocked set (code, math/science, creative, non-English): LLAMA_REPLAY_PROMPTS=$wc/prompts_domains.jsonl
+    "${CONDA_HOME:-$HOME/miniconda3}/bin/conda" run -n dataVis python -I \
+        "$ROOT/scripts/workloads/wildchat_domain_prompts.py" \
+        "$wc/train-00000-of-00014.parquet" "$wc/prompts_domains.jsonl"
+}
+
+# Mixtral-8x7B-Instruct Q4_K_M for -w mixtral (28.4GB). TheBloke's GGUFs predate merged
+# *_exps tensors and fail to load; this conversion is checked against its published sha256.
+build_llama_mixtral() {
+    local f="$ROOT/llama.cpp/models/Mixtral-8x7B-Instruct-v0.1-Q4_K_M.gguf"
+    wget -c -O "$f" \
+        "https://huggingface.co/worthdoing/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1-Q4_K_M-worthdoing.gguf"
+    echo "33da0b0c038f0d2f779c5c4777e167832e8a18f8bbad0fa196c4bfa81e5cea0a  $f" | sha256sum -c -
 }
 
 build_merci() {
@@ -426,6 +439,8 @@ run_job gapbs      build_gapbs
 run_job graph500   build_graph500
 run_job liblinear  build_liblinear
 run_job llama_models build_llama_models
+# opt-in only (28GB): runs when named, e.g. ./setup.sh llama_mixtral
+[[ " ${JOB_FILTER[*]} " == *" llama_mixtral "* ]] && run_job llama_mixtral build_llama_mixtral
 run_job merci      build_merci
 run_job silo       build_silo
 run_job xsbench    build_xsbench

@@ -49,10 +49,12 @@ def main():
                 print(f"[{i}] {rec['id']} FAILED: {e}", file=sys.stderr)
                 continue
             msg = resp["choices"][0].get("message", {})
-            row = {"idx": i, "id": rec["id"], "wall_s": round(time.time() - t0, 3),
+            row = {"idx": i, "id": rec["id"], "domain": rec.get("domain"), "t_start_unix": round(t0, 3), "wall_s": round(time.time() - t0, 3),
                    "finish_reason": resp["choices"][0].get("finish_reason"),
                    "reasoning_chars": len(msg.get("reasoning_content") or ""),
-                   "content_chars": len(msg.get("content") or ""), **resp.get("timings", {})}
+                   "content_chars": len(msg.get("content") or ""), **resp.get("timings", {}),
+                   "prompt": rec["prompt"], "reasoning": msg.get("reasoning_content") or "",
+                   "content": msg.get("content") or ""}
             out.write(json.dumps(row) + "\n")
             out.flush()
             print(f"[{i}] prompt_n={row.get('prompt_n')} predicted_n={row.get('predicted_n')} "
