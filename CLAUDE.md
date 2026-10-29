@@ -81,6 +81,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `merci` | `merci` | Requires dataset download via `setup.sh` |
 | `liblinear` | `liblinear` | Requires `kdd12` dataset download via `setup.sh` |
 | `gups` | `gups` | |
+| `btree` | `btree` | Mitosis B+tree lookups (`mitosis-workload-btree`, OpenMP). Tunables: `BTREE_THREADS` (4), `BTREE_ELEMENTS` (537M ≈ 32 GB, ~64 B/element RSS), `BTREE_LOOKUPS` (3.7B ≈ 2 min of lookups). |
 | `masim` | `masim` | Memory access simulator |
 | `npb-cpp` | varies | NAS Parallel Benchmarks |
 | `cloverleaf` | `cloverleaf` | |

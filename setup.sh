@@ -229,6 +229,11 @@ build_xsbench() {
     make -j"$J"
 }
 
+build_btree() {
+    cd "$ROOT/mitosis-workload-btree"
+    make -j"$J"
+}
+
 build_npb() {
     cd "$ROOT/NPB-CPP/libs/tbb-2020.1"
     make -j"$J"
@@ -406,6 +411,7 @@ run_job liblinear  build_liblinear
 run_job merci      build_merci
 run_job silo       build_silo
 run_job xsbench    build_xsbench
+run_job btree      build_btree
 run_job npb        build_npb
 run_job minimap2   build_minimap2
 run_job spec       build_spec
