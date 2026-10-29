@@ -72,4 +72,4 @@
 	url = https://github.com/renaissance-benchmarks/renaissance.git
 [submodule "mitosis-workload-btree"]
 	path = mitosis-workload-btree
-	url = https://github.com/mitosis-project/mitosis-workload-btree.git
+	url = https://github.com/hcoffey1/mitosis-workload-btree.git
