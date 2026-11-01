@@ -20,6 +20,7 @@
 #   SPEC_SRC      path to a SPEC CPU2017 install            (default /proj/instrument-PG0/spec)
 #   BUILD_SPEC2026=0  skip the (heavy) SPEC CPU2026 build
 #   SPEC2026_ISO  path to the CPU2026 ISO   (default /proj/instrument-PG0/cpu2026-1.0.1.iso)
+#   QWEN_MOE_QUANT  quant of the Qwen3-30B-A3B GGUF fetched by llama_models (default Q8_0, 32.5GB)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT" || exit 1
@@ -188,6 +189,40 @@ build_liblinear() {
         unxz kdd12.xz   # removes the .xz on success
     fi
     make -j"$J"
+}
+
+# MoE model + WildChat replay prompts for llama.cpp (-w qwen). llama.cpp/models/*
+# is gitignored by the submodule. wget -c resumes partial files and no-ops on complete ones.
+build_llama_models() {
+    local quant="${QWEN_MOE_QUANT:-Q8_0}"
+    local file="Qwen3-30B-A3B-${quant}.gguf"
+    mkdir -p "$ROOT/llama.cpp/models"
+    wget -c -O "$ROOT/llama.cpp/models/$file" \
+        "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/$file"
+    echo "model ready: $ROOT/llama.cpp/models/$file"
+
+    # Replay prompts for -w qwen: one WildChat-1M shard (ODC-BY, ungated) -> JSONL
+    # pool. Needs pyarrow from the dataVis env that prereqs provisions.
+    local wc="$ROOT/llama.cpp/models/wildchat"
+    mkdir -p "$wc"
+    wget -c -O "$wc/train-00000-of-00014.parquet" \
+        "https://huggingface.co/datasets/allenai/WildChat-1M/resolve/main/data/train-00000-of-00014.parquet"
+    "${CONDA_HOME:-$HOME/miniconda3}/bin/conda" run -n dataVis python -I \
+        "$ROOT/scripts/workloads/wildchat_prompts.py" \
+        "$wc/train-00000-of-00014.parquet" "$wc/prompts.jsonl"
+    # Domain-blocked set (code, math/science, creative, non-English): LLAMA_REPLAY_PROMPTS=$wc/prompts_domains.jsonl
+    "${CONDA_HOME:-$HOME/miniconda3}/bin/conda" run -n dataVis python -I \
+        "$ROOT/scripts/workloads/wildchat_domain_prompts.py" \
+        "$wc/train-00000-of-00014.parquet" "$wc/prompts_domains.jsonl"
+}
+
+# Mixtral-8x7B-Instruct Q4_K_M for -w mixtral (28.4GB). TheBloke's GGUFs predate merged
+# *_exps tensors and fail to load; this conversion is checked against its published sha256.
+build_llama_mixtral() {
+    local f="$ROOT/llama.cpp/models/Mixtral-8x7B-Instruct-v0.1-Q4_K_M.gguf"
+    wget -c -O "$f" \
+        "https://huggingface.co/worthdoing/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1-Q4_K_M-worthdoing.gguf"
+    echo "33da0b0c038f0d2f779c5c4777e167832e8a18f8bbad0fa196c4bfa81e5cea0a  $f" | sha256sum -c -
 }
 
 build_merci() {
@@ -408,6 +443,9 @@ run_job flexkvs    build_flexkvs
 run_job gapbs      build_gapbs
 run_job graph500   build_graph500
 run_job liblinear  build_liblinear
+run_job llama_models build_llama_models
+# opt-in only (28GB): runs when named, e.g. ./setup.sh llama_mixtral
+[[ " ${JOB_FILTER[*]} " == *" llama_mixtral "* ]] && run_job llama_mixtral build_llama_mixtral
 run_job merci      build_merci
 run_job silo       build_silo
 run_job xsbench    build_xsbench

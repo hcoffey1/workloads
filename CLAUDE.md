@@ -86,7 +86,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `npb-cpp` | varies | NAS Parallel Benchmarks |
 | `cloverleaf` | `cloverleaf` | |
 | `minimap2` | `minimap2` | Requires genome data |
-| `llama_cpp` | `llama_cpp` | Requires model weights |
+| `llama_cpp` | `llama_cpp`, `llama-cli`, `llama-server`, `qwen`, `mixtral` | Requires model weights. Default TinyLlama auto-downloads. `qwen`: single-user replay of WildChat-1M prompts on Qwen3-30B-A3B (MoE, Q8_0 32.5GB) via llama-server; model + prompts from `./setup.sh llama_models`. Tunables `LLAMA_REPLAY_N` (20), `LLAMA_THINKING` (0/1), `LLAMA_REPLAY_MAX_TOKENS` (2048, or 8192 with thinking; ctx 16384); per-request server timings in `qwen_replay_iter<N>.jsonl`. Model loads in ~3 min. `mixtral`: the same replay on Mixtral-8x7B-Instruct (8 experts, top-2, Q4_K_M 28.4GB, opt-in `./setup.sh llama_mixtral`); runs with `--no-repack` (`LLAMA_REPACK=1` re-enables) so weights keep their GGUF layout. |
 | `dcperf` | varies | Meta DCPerf suite |
 | `memcached` | `memcached` | |
 | `cachelib` | `cachelib` | |
