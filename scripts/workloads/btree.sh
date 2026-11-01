@@ -5,8 +5,8 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 # Mitosis B+tree: build tree of N keys, then L random lookups (OpenMP-parallel).
 config_btree(){
     num_threads=${BTREE_THREADS:-4}
-    nelements=${BTREE_ELEMENTS:-537000000}  # ~32 GB RSS at ~64 B/element
-    nlookup=${BTREE_LOOKUPS:-3700000000}  # ~2 min of lookups at 4 threads, 32 GB
+    nelements=${BTREE_ELEMENTS:-111000000}  # 32 GiB RSS at ~302 B/element; build ~6.3 min
+    nlookup=${BTREE_LOOKUPS:-535000000}  # ~6.3 min of lookups at 4 threads, slow-bind (matches build)
 }
 
 build_btree(){
@@ -23,7 +23,8 @@ run_btree(){
     run_sudo rm -f /tmp/mitosis-btree-bench.ready /tmp/mitosis-btree-bench.done
 
     # Args after "--" go to the benchmark's inner getopt.
-    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/mitosis-workload-btree/bin/bench_btree_mt" \
+    # BTREE_BIN swaps in an alternate build (e.g. allocator variants).
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "${BTREE_BIN:-$CUR_PATH/mitosis-workload-btree/bin/bench_btree_mt}" \
         "-- -n $nelements -l $nlookup" "export OMP_NUM_THREADS=\"$num_threads\""
 
     run_workload_standard

@@ -65,7 +65,8 @@ run_gapbs(){
     generate_workload_filenames "$workload"
 
     # Create wrapper using utility function
-    create_workload_wrapper "$WRAPPER" "$PIDFILE" "$CUR_PATH/gapbs/$kernel" "-n \"$reps\" $input" "export OMP_NUM_THREADS=\"$num_threads\""
+    # GAPBS_BIN_DIR swaps in alternate kernel builds (e.g. allocator variants).
+    create_workload_wrapper "$WRAPPER" "$PIDFILE" "${GAPBS_BIN_DIR:-$CUR_PATH/gapbs}/$kernel" "-n \"$reps\" $input" "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
     run_workload_standard

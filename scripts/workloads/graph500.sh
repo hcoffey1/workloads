@@ -31,7 +31,8 @@ run_graph500(){
     generate_workload_filenames "$workload"
 
     # Use utility function to create and run workload
-    local binary_path="$CUR_PATH/graph500/omp-csr/omp-csr"
+    # GRAPH500_BIN swaps in an alternate omp-csr build (e.g. allocator variants).
+    local binary_path="${GRAPH500_BIN:-$CUR_PATH/graph500/omp-csr/omp-csr}"
     local binary_args="-s $size -V"
     
     # Create wrapper with specific environment variables
