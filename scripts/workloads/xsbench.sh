@@ -3,9 +3,9 @@
 source "$CUR_PATH/scripts/workload_utils.sh"
 
 config_xsbench(){
-    num_threads=16
+    num_threads=${XSBENCH_THREADS:-16}
     particles=20000000 # Should take about 64G
-    gridpoints=130000
+    gridpoints=${XSBENCH_GRIDPOINTS:-130000}
 }
 
 build_xsbench(){
@@ -19,7 +19,8 @@ run_xsbench(){
     generate_workload_filenames "$workload"
 
     # Set OpenMP threads in the wrapper creation
-    local binary_path="$CUR_PATH/XSBench/openmp-threading/XSBench"
+    # XSBENCH_BIN swaps in an alternate build (e.g. allocator variants).
+    local binary_path="${XSBENCH_BIN:-$CUR_PATH/XSBench/openmp-threading/XSBench}"
     local binary_args="-t $num_threads -p $particles -g $gridpoints"
 
     # Create wrapper with OMP_NUM_THREADS environment variable

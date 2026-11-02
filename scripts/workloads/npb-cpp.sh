@@ -5,7 +5,7 @@ source "$CUR_PATH/scripts/workload_utils.sh"
 set -x
 
 config_npb-cpp(){
-    NPB_CLASS=D
+    NPB_CLASS=${NPB_CLASS:-D}
     num_threads=8
 }
 
@@ -25,11 +25,12 @@ build_npb-cpp(){
 run_npb-cpp(){
     local workload=$1
 
+    # NPB_BIN swaps in an alternate build (e.g. allocator variants).
     # Generate filenames using utility function
     generate_workload_filenames "$workload"
 
     create_workload_wrapper "$WRAPPER" "$PIDFILE" \
-        "$CUR_PATH/NPB-CPP/NPB-OMP/bin/${workload}.${NPB_CLASS}" "" \
+        "${NPB_BIN:-$CUR_PATH/NPB-CPP/NPB-OMP/bin/${workload}.${NPB_CLASS}}" "" \
         "export OMP_NUM_THREADS=\"$num_threads\""
 
     # Use standard workload execution
