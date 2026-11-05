@@ -14,13 +14,13 @@ select_ann_solo_python() {
         return
     fi
     # Try Python versions in order of compatibility with lancedb/pyarrow
-    for py_version in python3.9 python3.10 python3.11 python3.12; do
+    for py_version in python3.10 python3.11 python3.12; do
         if command -v "$py_version" >/dev/null 2>&1; then
             echo "$py_version"
             return
         fi
     done
-    echo "ERROR: No compatible Python found. ANN-SoLo requires Python 3.9-3.12. Python 3.13+ is not compatible with lancedb." >&2
+    echo "ERROR: No compatible Python found. ANN-SoLo requires Python 3.10-3.12. Python 3.13+ is not compatible with lancedb." >&2
     echo "python3"  # Fallback, but will likely fail
 }
 
@@ -245,50 +245,32 @@ build_ann-solo(){
     local python_bin
     python_bin=$(select_ann_solo_python)
 
+    # A venv from a failed build or the old lancedb 0.3.x pin can't be reused, and the
+    # library caches it wrote have no scalar indexes, so rebuild both.
+    if [[ -x "$ANN_SOLO_VENV/bin/python" ]] && ! "$ANN_SOLO_VENV/bin/python" - <<'PY'
+import lancedb, mokapot, sys
+sys.exit(tuple(int(x) for x in lancedb.__version__.split('.')[:2]) < (0, 41))
+PY
+    then
+        echo "WARNING: Stale ANN-SoLo virtualenv detected. Rebuilding..."
+        # Workloads run as root, so the library caches are root-owned.
+        sudo rm -rf "${ANN_SOLO_DATA_ROOT:?}"/*/library_*_*
+        rm -rf "${ANN_SOLO_VENV:?}"
+    fi
+
     if [[ ! -x "$ANN_SOLO_VENV/bin/python" ]]; then
         echo "Creating ANN-SoLo virtualenv using $python_bin"
         "$python_bin" -m venv "$ANN_SOLO_VENV"
         "$ANN_SOLO_VENV/bin/pip" install --upgrade pip setuptools wheel
-        # Pin NumPy 1.x - pyarrow 14.x was compiled against NumPy 1.x
-        "$ANN_SOLO_VENV/bin/pip" install "numpy>=1.21,<2.0"
         local faiss_pkg="${ANN_SOLO_FAISS_PACKAGE:-faiss-cpu}"
         if [[ -n "${ANN_SOLO_FAISS_VERSION:-}" ]]; then
             "$ANN_SOLO_VENV/bin/pip" install "$faiss_pkg==${ANN_SOLO_FAISS_VERSION}"
         else
             "$ANN_SOLO_VENV/bin/pip" install "$faiss_pkg"
         fi
-        # Pin compatible versions: lancedb 0.3.x requires pyarrow <15
-        "$ANN_SOLO_VENV/bin/pip" install "pyarrow>=14.0.1,<15.0" "lancedb>=0.3.0,<0.4.0"
-        "$ANN_SOLO_VENV/bin/pip" install ConfigArgParse Cython joblib matplotlib mmh3 "mokapot>=0.8.3" "numba>=0.41" numexpr pandas pyteomics scipy "spectrum_utils>=0.4.2" tqdm psims koinapy "tritonclient[grpc]"
+        "$ANN_SOLO_VENV/bin/pip" install "lancedb>=0.41" ConfigArgParse Cython joblib matplotlib mmh3 "mokapot>=0.8.3" "numba>=0.41" numexpr pandas pyteomics scipy "spectrum_utils>=0.4.2" tqdm psims koinapy "tritonclient[grpc]"
     else
         echo "Reusing ANN-SoLo virtualenv at $ANN_SOLO_VENV"
-        # Check if numpy/pyarrow/lancedb versions are compatible
-        if ! "$ANN_SOLO_VENV/bin/python" - <<'PY'
-import sys
-try:
-    import numpy as np
-    import pyarrow as pa
-    import lancedb
-    # Check numpy version is < 2.0 for pyarrow 14.x compatibility
-    np_version = tuple(int(x) for x in np.__version__.split('.')[:2])
-    if np_version >= (2, 0):
-        print(f"ERROR: numpy {np.__version__} is too new for pyarrow 14.x. Need numpy <2.0", file=sys.stderr)
-        sys.exit(1)
-    # Check pyarrow version is < 15 for lancedb 0.3.x compatibility
-    pa_version = tuple(int(x) for x in pa.__version__.split('.')[:2])
-    if pa_version >= (15, 0):
-        print(f"ERROR: pyarrow {pa.__version__} is too new for lancedb. Need pyarrow <15", file=sys.stderr)
-        sys.exit(1)
-except Exception as e:
-    print(f"ERROR: {e}", file=sys.stderr)
-    sys.exit(1)
-PY
-        then
-            echo "WARNING: Incompatible numpy/pyarrow/lancedb versions detected. Reinstalling..."
-            "$ANN_SOLO_VENV/bin/pip" uninstall -y numpy pyarrow lancedb
-            "$ANN_SOLO_VENV/bin/pip" install "numpy>=1.21,<2.0"
-            "$ANN_SOLO_VENV/bin/pip" install "pyarrow>=14.0.1,<15.0" "lancedb>=0.3.0,<0.4.0"
-        fi
     fi
 
     if ! "$ANN_SOLO_VENV/bin/python" - <<'PY'
@@ -305,7 +287,7 @@ PY
     fi
 
     "$ANN_SOLO_VENV/bin/python" - <<'PY'
-import importlib, sys
+import importlib.util, sys
 modules = [
     "faiss",
     "lancedb",
@@ -326,7 +308,8 @@ if missing:
 PY
 
     pushd "$ANN_SOLO_SRC" > /dev/null
-    "$ANN_SOLO_VENV/bin/python" setup.py build_ext --inplace
+    # --force: extensions left by an older venv may be built against a different NumPy ABI.
+    "$ANN_SOLO_VENV/bin/python" setup.py build_ext --inplace --force
     popd > /dev/null
 }
 
