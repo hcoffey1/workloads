@@ -64,7 +64,7 @@ config_duckdb(){
 build_duckdb(){
     local _workload="$1"
 
-    (cd "$CUR_PATH/duckdb" && BUILD_BENCHMARK=1 BUILD_EXTENSIONS='tpch;tpcds' make -j$(nproc))
+    (cd "$CUR_PATH/duckdb" && BUILD_BENCHMARK=1 BUILD_EXTENSIONS='tpch;tpcds' CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) make)
 
     if [[ -n "$cache_db" ]]; then
         local cache_path="$CUR_PATH/duckdb/duckdb_benchmark_data/$cache_db"
