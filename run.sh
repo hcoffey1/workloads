@@ -34,6 +34,19 @@ run_sudo() {
     fi
 }
 
+# Workloads run as root (and some builds use sudo), so hand back what this run
+# created. -cnewer, not -newer: installers can preserve old mtimes. -H: the repo
+# path may be a symlink. Runs from the EXIT trap, so failures must not change rc.
+reclaim_root_files() {
+    [[ -n "${RUN_START_MARKER:-}" ]] || return 0
+    local count
+    count=$(run_sudo find -H "$CUR_PATH" "$OUTPUT_DIR" -xdev -user root -cnewer "$RUN_START_MARKER" \
+        -print -exec chown -h "$(id -u):$(id -g)" {} + | sort -u | wc -l) ||
+        echo "WARNING: could not reclaim root-owned files" >&2
+    echo "Reclaimed ${count:-0} root-owned files"
+    rm -f "$RUN_START_MARKER"
+}
+
 # Function to display usage instructions
 usage() {
     cat << EOF
@@ -621,6 +634,12 @@ main() {
         echo "Creating output directory: $OUTPUT_DIR"
         mkdir -p "$OUTPUT_DIR"
     fi
+
+    # Bash skips EXIT traps on untrapped signals, so turn INT/TERM into exits.
+    RUN_START_MARKER=$(mktemp)
+    trap reclaim_root_files EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     # Validate and setup workload
     local suite_script="$CUR_PATH/scripts/workloads/${SUITE}.sh"
