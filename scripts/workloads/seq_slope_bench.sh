@@ -22,12 +22,12 @@ config_seq_slope_bench(){
 }
 
 build_seq_slope_bench(){
-    (cd "$CUR_PATH/seq_slope_bench" && make -j$(nproc))
+    (cd "$CUR_PATH/microbench/seq_slope_bench" && make -j$(nproc))
 }
 
 run_seq_slope_bench(){
     local workload=$1
-    local bin="$CUR_PATH/seq_slope_bench/seq_slope_bench"
+    local bin="$CUR_PATH/microbench/seq_slope_bench/seq_slope_bench"
 
     if [[ ! -x "$bin" ]]; then
         echo "ERROR: seq_slope_bench binary not found at $bin"
