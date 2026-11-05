@@ -63,12 +63,12 @@ build_dcperf(){
             if [[ "$ARCH" == "x86_64" ]]; then
                 if [[ -f "install_feedsim_x86_64_ubuntu.sh" ]]; then
                     echo "Running feedsim installation (may require sudo password)..."
-                    sudo bash install_feedsim_x86_64_ubuntu.sh
+                    sudo -H bash install_feedsim_x86_64_ubuntu.sh
                 else
-                    sudo bash install_feedsim.sh
+                    sudo -H bash install_feedsim.sh
                 fi
             elif [[ "$ARCH" == "aarch64" ]]; then
-                sudo bash install_feedsim_aarch64.sh
+                sudo -H bash install_feedsim_aarch64.sh
             else
                 echo "ERROR: Unsupported architecture: $ARCH"
                 return 1

@@ -12,12 +12,12 @@ config_cachelib(){
 build_cachelib(){
     pushd $CUR_PATH/CacheLib
 
-    # CacheLib needs fastfloat installed to run.
-    #git clone https://github.com/fastfloat/fast_float.git
-    #pushd fast_float
-    #cmake -B build -DFASTFLOAT_TEST=OFF
-    #sudo cmake --build build --target install
-    #popd
+    # FastFloat (folly dep) is installed by setup.sh prereqs.
+
+    # Earlier sudo builds (e.g. dcperf feedsim) can leave the CMake package registry root-owned, breaking gflags install
+    if [[ -d "$HOME/.cmake" ]] && find "$HOME/.cmake" ! -user "$(id -u)" -print -quit | grep -q .; then
+        sudo chown -R "$(id -u):$(id -g)" "$HOME/.cmake"
+    fi
 
     ./contrib/build.sh -j -T
 

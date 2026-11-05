@@ -130,7 +130,15 @@ prereqs() {
         openjdk-21-jdk python3.10-venv python3.10-dev htop \
         libevent-dev maven \
         autoconf automake libtool \
-        libdb-dev libdb++-dev   # Silo (autotools + Berkeley DB db_cxx.h)
+        libdb-dev libdb++-dev `# Silo (autotools + Berkeley DB db_cxx.h)` \
+        cmake                 `# CacheLib (FastFloat install below)`
+
+    # CacheLib: folly needs FastFloat, which jammy doesn't package and CacheLib's
+    # contrib/build.sh doesn't build. Header-only, so install the submodule into
+    # the prefix build.sh searches (CacheLib/opt/cachelib) -- no sudo needed.
+    cmake -S "$ROOT/CacheLib/cachelib/external/fast_float" -B "$ROOT/CacheLib/build-fast_float" \
+        -DFASTFLOAT_TEST=OFF -DCMAKE_INSTALL_PREFIX="$ROOT/CacheLib/opt/cachelib" &&
+        cmake --install "$ROOT/CacheLib/build-fast_float" || return 1
 
     # Miniconda (headless) + dataVis env for plotting/analysis.  Delegated to the
     # cluster's single source of truth so every provisioning path builds conda the
