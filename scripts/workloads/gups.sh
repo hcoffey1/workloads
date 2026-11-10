@@ -23,6 +23,8 @@ run_gups(){
     # Run GUPS
     #taskset 0xFF "${CUR_PATH}/gups_hemem/gups-skewed" \
     #    "$num_threads" "$num_iter" "$mem_size_log" "$item_size" "$hot_mem_size_log"
+    echo "ERROR: gups run is disabled (softlocks server, see TODO above)" >&2
+    return 1
 }
 
 clean_gups(){
