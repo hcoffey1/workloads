@@ -116,7 +116,18 @@ prereqs() {
     # registered and "clean" at the right commit, but every file in it was
     # staged-deleted, so setup silently shipped an empty tree and the build died
     # on `cd NPB-CPP/libs/tbb-2020.1`. --force re-checks-out the worktree.
-    git submodule update --init --recursive --force
+    # GitHub submodules fetch over SSH. .gitmodules already uses SSH URLs;
+    # `sync` pushes them into .git/config for checkouts initialized under the
+    # old HTTPS URLs, and the insteadOf rewrite covers nested submodules whose
+    # .gitmodules we don't control (GIT_CONFIG_PARAMETERS reaches child gits).
+    git submodule sync --recursive
+    # silo stays on HTTPS (Bitbucket) and prompts for a password. Clone it
+    # first so the prompt appears immediately rather than after every other
+    # submodule has been fetched; the full update below then finds it present.
+    git submodule update --init --recursive --force silo
+    # --jobs: clone submodules in parallel (override with SUBMODULE_JOBS).
+    git -c url."git@github.com:".insteadOf="https://github.com/" \
+        submodule update --init --recursive --force --jobs "${SUBMODULE_JOBS:-8}"
 
     sudo apt-get update
     # intel-mkl (Faiss BLAS backend) prompts a license UI that breaks headless
@@ -286,7 +297,8 @@ build_npb() {
 
 build_minimap2() {
     cd "$ROOT/minimap2"
-    git submodule update --init --recursive
+    git -c url."git@github.com:".insteadOf="https://github.com/" \
+        submodule update --init --recursive
 }
 
 # SPEC CPU2017: copies a SPEC install locally, writes a clean (non-XRay) -O3 gcc
