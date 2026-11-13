@@ -69,6 +69,8 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 
 `patches/` contains the `silo.patch` git patch that must be applied before building the `silo` submodule. `setup.sh` applies it automatically; apply individually with `git apply ../../patches/silo.patch` from within the `silo/silo` directory.
 
+`patches/pebs-bpf-filter-large-pebs.patch` is a **kernel** patch against **Linux 7.3.4** (not applied by `setup.sh`). Stock kernels skip an event's BPF filter (`PERF_EVENT_IOC_SET_BPF`) for all but the last record of each large-PEBS batch; the patch runs it on every record so a program returning 0 drops the sample before the ring buffer. Required for zipf_bench `--perf-drop-all` / `ZIPF_BENCH_PERF_DROP_ALL=1` and ARMS's `REGENT_PEBS_DROP_ALL=1` to drop all samples. Apply with `patch -p1 < .../pebs-bpf-filter-large-pebs.patch` in a 7.3.4 source tree.
+
 ## Workload Index
 
 | Suite flag (`-b`) | Workload flag (`-w`) | Notes |
@@ -83,6 +85,7 @@ The harness supports interposing a memory allocation policy via `LD_PRELOAD` thr
 | `gups` | `gups` | |
 | `btree` | `btree` | Mitosis B+tree lookups (`mitosis-workload-btree`, OpenMP). Tunables: `BTREE_THREADS` (4), `BTREE_ELEMENTS` (537M ≈ 32 GB, ~64 B/element RSS), `BTREE_LOOKUPS` (3.7B ≈ 2 min of lookups). |
 | `masim` | `masim` | Memory access simulator |
+| `zipf_bench` | `zipf_bench` | Page-granular Zipfian access microbench (`microbench/zipf_bench`). Tunables: `ZIPF_BENCH_BYTES` (32 GiB), `ZIPF_BENCH_HOT_FRAC`/`ZIPF_BENCH_HOT_ACCESS` (0.2/0.8 → θ solved) or `ZIPF_BENCH_THETA`, `ZIPF_BENCH_DURATION` (60 s), `ZIPF_BENCH_THREADS` (8), `ZIPF_BENCH_SHUFFLE` (1 = hot pages scattered). Workers pinned one per physical core; PEBS L3-miss sampling (`ZIPF_BENCH_PERF`=1, `ZIPF_BENCH_PERF_PERIOD` 1007, `ZIPF_BENCH_PERF_RING_PAGES` 512) writes `<base>_perf_*`; plot with `scripts/vis/plot_zipf_bench.py`. Don't combine with `-i pebs`. |
 | `npb-cpp` | varies | NAS Parallel Benchmarks |
 | `cloverleaf` | `cloverleaf` | |
 | `minimap2` | `minimap2` | Requires genome data |

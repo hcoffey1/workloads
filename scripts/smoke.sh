@@ -18,7 +18,7 @@ DEFAULT=(
     dcperf:feedsim memcached:memcached cachelib:cachelib ann-solo:toy
     mscrush:mscrush spec:mcf spec2026:lbm ogb:products duckdb:tpcds_sf100_q01
     faiss:sift1M renaissance:als micro_interference:micro_interference
-    micro_phase:micro_phase seq_slope_bench:seq_slope_bench
+    micro_phase:micro_phase seq_slope_bench:seq_slope_bench zipf_bench:zipf_bench
 )
 jobs=("$@"); (( ${#jobs[@]} )) || jobs=("${DEFAULT[@]}")
 
