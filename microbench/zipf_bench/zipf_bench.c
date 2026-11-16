@@ -51,6 +51,7 @@
 
 #define CACHE_LINE 64
 #define CHECK_INTERVAL 1024 /* accesses between clock checks */
+#define PUBLISH_MASK ((uint64_t)CHECK_INTERVAL * 64 - 1)
 #define NEVENTS 1
 
 enum { EV_L3_MISS = 0 };
@@ -81,6 +82,11 @@ struct options {
     int perf_keep_all; /* also log samples outside the buffer */
     int perf_drop_all; /* attach a BPF filter that drops every sample in-kernel */
     int bpf_prog_fd;
+    /* hot-set change: 0 = off; else steady-state window (s) for the reshuffle trigger */
+    double reshuffle_steady_window_s;
+    double post_recover_s;
+    double placement_interval_s;
+    const char *placement_dump; /* NULL: off; else per-poll rank-ordered node-0 flags */
 };
 
 /* ---------------------------------------------------------------- RNG */
@@ -551,7 +557,7 @@ static void *run_monitor(void *arg)
 
 struct shared {
     uint8_t *buf;
-    const uint32_t *perm; /* rank-1 -> page; NULL = identity */
+    uint32_t *perm; /* rank-1 -> page; NULL = identity. Swapped at runtime by the reshuffle. */
     uint64_t pages;
     uint64_t hot_n;
     size_t page_size;
@@ -564,6 +570,7 @@ struct shared {
     int failed; /* atomic: workers whose setup failed */
     volatile int start;
     volatile int abort;
+    volatile int stop; /* placement monitor ends the run early */
 };
 
 struct worker {
@@ -573,6 +580,7 @@ struct worker {
     struct ring *ring; /* NULL: no perf */
     uint64_t seed;
     uint64_t accesses;
+    uint64_t live_accesses; /* published every PUBLISH_MASK+1 accesses for the placement log */
     uint64_t hot_accesses;
     uint64_t runtime_ns;
     uint64_t sink;
@@ -697,10 +705,12 @@ static void *run_worker(void *arg)
     const uint64_t start = now_ns();
     uint64_t now = start;
     do {
+        /* One load per batch: a reshuffle takes effect within CHECK_INTERVAL accesses. */
+        const uint32_t *perm = __atomic_load_n(&sh->perm, __ATOMIC_ACQUIRE);
         for (int i = 0; i < CHECK_INTERVAL; i++) {
             uint64_t rank = zipf_sample(&sh->zipf, &r);
             hot += rank <= sh->hot_n;
-            uint64_t page = sh->perm ? sh->perm[rank - 1] : rank - 1;
+            uint64_t page = perm ? perm[rank - 1] : rank - 1;
             size_t line = (size_t)(rng_next(&r) % sh->lines_per_page);
             volatile uint8_t *p = sh->buf + page * sh->page_size + line * CACHE_LINE;
             if (sh->write_mode)
@@ -709,8 +719,11 @@ static void *run_worker(void *arg)
                 sink += *p;
         }
         accesses += CHECK_INTERVAL;
+        /* Rare enough that neighbouring workers' counters do not false-share. */
+        if (!(accesses & PUBLISH_MASK))
+            __atomic_store_n(&w->live_accesses, accesses, __ATOMIC_RELAXED);
         now = now_ns();
-    } while (now - start < sh->duration_ns);
+    } while (now - start < sh->duration_ns && !sh->stop);
     if (w->ring) {
         perf_ctl(w->ring, PERF_EVENT_IOC_DISABLE);
         for (int e = 0; e < w->ring->nev; e++)
@@ -723,6 +736,174 @@ static void *run_worker(void *arg)
     w->runtime_ns = now - start;
     w->sink = sink;
     return NULL;
+}
+
+/* ------------------------------------------------ hot-set change monitor */
+
+static void fill_perm(uint32_t *perm, uint64_t pages, uint64_t seed)
+{
+    for (uint64_t i = 0; i < pages; i++)
+        perm[i] = (uint32_t)i;
+    struct rng r;
+    rng_seed(&r, seed);
+    for (uint64_t i = pages - 1; i > 0; i--) {
+        uint64_t j = rng_next(&r) % (i + 1);
+        uint32_t t = perm[i];
+        perm[i] = perm[j];
+        perm[j] = t;
+    }
+}
+
+/* Read-only move_pages (nodes = NULL): status[i] = NUMA node of page i. */
+static int query_nodes(void **addrs, int *status, uint64_t pages)
+{
+    for (uint64_t off = 0; off < pages; off += 65536) {
+        unsigned long n = pages - off < 65536 ? pages - off : 65536;
+        if (syscall(SYS_move_pages, 0, n, addrs + off, NULL, status + off, 0) < 0) {
+            perror("move_pages(query)");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Phases: 0 = initial fill; 1 = after the reshuffle; 2 = recovered.
+ * Steady (0 -> 1): node-0 page count moved by <= 0.1% of the buffer over the
+ * window. Occupancy stays at the cap after the reshuffle, so recovery
+ * (1 -> 2) is judged on wfast, the Zipf-weighted share of accesses whose page
+ * is on node 0 under the current shuffle.
+ */
+static int placement_monitor(const struct options *o, struct shared *sh, struct worker *w, int nw,
+                             uint64_t seed2)
+{
+    const uint64_t n = sh->pages;
+    if (n > (1ull << 24)) {
+        fprintf(stderr, "--reshuffle-on-steady: %" PRIu64 " pages is too many to poll; use 2 MiB pages\n", n);
+        return -1;
+    }
+    const size_t win = (size_t)ceil(o->reshuffle_steady_window_s / o->placement_interval_s) + 1;
+    void **addrs = malloc(n * sizeof(*addrs));
+    int *status = malloc(n * sizeof(*status));
+    double *pmf = malloc(n * sizeof(*pmf));
+    uint32_t *next = malloc(n * sizeof(*next));
+    uint64_t *hist = calloc(win, sizeof(*hist));
+    uint8_t *row = malloc(n);
+    FILE *dump = o->placement_dump ? fopen(o->placement_dump, "wb") : NULL;
+    int rc = 0, phase = 0;
+    if (o->placement_dump && !dump) {
+        perror(o->placement_dump);
+        rc = -1;
+        goto out;
+    }
+    if (!addrs || !status || !pmf || !next || !hist || !row) {
+        perror("malloc");
+        rc = -1;
+        goto out;
+    }
+    for (uint64_t i = 0; i < n; i++)
+        addrs[i] = sh->buf + i * sh->page_size;
+    double norm = 0.0;
+    for (uint64_t r = 0; r < n; r++)
+        norm += pmf[r] = pow((double)(r + 1), -sh->zipf.s);
+    for (uint64_t r = 0; r < n; r++)
+        pmf[r] /= norm;
+    if (o->shuffle) {
+        fill_perm(next, n, seed2);
+    } else { /* contiguous layout: invert, so the hot end becomes the cold end */
+        for (uint64_t r = 0; r < n; r++)
+            next[r] = (uint32_t)(n - 1 - r);
+    }
+
+    const uint64_t t0 = now_ns(), tol = n / 1000 ? n / 1000 : 1;
+    const struct timespec iv = {(time_t)o->placement_interval_s,
+                                (long)(fmod(o->placement_interval_s, 1.0) * 1e9)};
+    uint64_t last_acc = 0, last_ns = t0, k = 0;
+    double pre_wfast = 0.0, t_rec = 0.0;
+    while (!sh->stop) {
+        nanosleep(&iv, NULL);
+        const uint64_t now = now_ns();
+        const double t = (double)(now - t0) / 1e9;
+        if (now - t0 >= sh->duration_ns)
+            break;
+        /* Read counters with the timestamp: move_pages below can stall for seconds. */
+        uint64_t acc = 0;
+        for (int i = 0; i < nw; i++)
+            acc += __atomic_load_n(&w[i].live_accesses, __ATOMIC_RELAXED);
+        if (query_nodes(addrs, status, n)) {
+            rc = -1;
+            break;
+        }
+        const uint32_t *perm = sh->perm; /* only this thread swaps it; NULL = identity */
+        uint64_t c0 = 0, c1 = 0, cx = 0, hotf = 0;
+        double wf = 0.0;
+        for (uint64_t i = 0; i < n; i++) {
+            c0 += status[i] == 0;
+            c1 += status[i] == 1;
+            cx += status[i] != 0 && status[i] != 1;
+        }
+        for (uint64_t r = 0; r < n; r++)
+            if ((row[r] = status[perm ? perm[r] : r] == 0)) {
+                wf += pmf[r];
+                hotf += r < sh->hot_n;
+            }
+        if (dump && (fwrite(&t, sizeof(t), 1, dump) != 1 || fwrite(row, 1, n, dump) != n)) {
+            perror("placement dump");
+            rc = -1;
+            break;
+        }
+        printf("[PLACEMENT] t=%.1f phase=%d node0=%" PRIu64 " node1=%" PRIu64 " other=%" PRIu64
+               " wfast=%.4f hot_fast=%.4f macc_s=%.2f\n",
+               t, phase, c0, c1, cx, wf, (double)hotf / (double)sh->hot_n,
+               (double)(acc - last_acc) / ((double)(now - last_ns) / 1e3));
+        last_acc = acc;
+        last_ns = now;
+
+        hist[k++ % win] = c0;
+        if (phase == 0 && k >= win && c0 > 0) {
+            uint64_t lo = UINT64_MAX, hi = 0;
+            for (size_t j = 0; j < win; j++) {
+                lo = hist[j] < lo ? hist[j] : lo;
+                hi = hist[j] > hi ? hist[j] : hi;
+            }
+            if (hi - lo <= tol) {
+                struct timespec wall;
+                clock_gettime(CLOCK_REALTIME, &wall);
+                pre_wfast = wf;
+                __atomic_store_n(&sh->perm, next, __ATOMIC_RELEASE);
+                next = NULL; /* workers own it now; main frees it after join */
+                printf("[EVENT] steady t=%.1f node0=%" PRIu64 " wfast=%.4f hot_fast=%.4f\n", t, c0, wf,
+                       (double)hotf / (double)sh->hot_n);
+                printf("[EVENT] reshuffle t=%.1f wall_epoch=%.3f layout=%s\n", t,
+                       (double)wall.tv_sec + (double)wall.tv_nsec / 1e9,
+                       o->shuffle ? "new_shuffle" : "inverted");
+                phase = 1;
+            }
+        } else if (phase == 1 && wf >= pre_wfast - 0.005) {
+            printf("[EVENT] recovered t=%.1f wfast=%.4f pre_wfast=%.4f\n", t, wf, pre_wfast);
+            t_rec = t;
+            phase = 2;
+        } else if (phase == 2 && t - t_rec >= o->post_recover_s) {
+            printf("[EVENT] stop t=%.1f\n", t);
+            sh->stop = 1;
+        }
+        fflush(stdout);
+    }
+    if (phase < 2)
+        printf("[EVENT] end t=%.1f phase=%d (hit --duration-s before %s)\n", (double)(now_ns() - t0) / 1e9,
+               phase, phase == 0 ? "steady state" : "recovery");
+out:
+    if (dump && fclose(dump)) {
+        perror("placement dump");
+        rc = -1;
+    }
+    free(row);
+    free(addrs);
+    free(status);
+    free(pmf);
+    free(next);
+    free(hist);
+    return rc;
 }
 
 struct prefault_arg {
@@ -808,6 +989,16 @@ static void usage(const char *prog)
             "  --read-only          Issue loads instead of read-modify-write increments\n"
             "  --no-pin             Do not pin workers (default: one physical core each)\n"
             "  --cpus LIST          Explicit worker CPUs, e.g. 0-7 (monitor takes the next allowed CPU)\n"
+            "Hot-set change:\n"
+            "  --reshuffle-on-steady W  Once fast-tier (node 0) occupancy stays within 0.1%% of the\n"
+            "                       buffer for W s, swap in a new rank->page shuffle (new hot set);\n"
+            "                       with --no-shuffle, invert the layout instead (hot end becomes cold).\n"
+            "                       Logs [PLACEMENT]/[EVENT] lines; --duration-s stays the hard cap\n"
+            "  --post-recover-s P   After the access-weighted fast-tier hit share is back within\n"
+            "                       0.5 points of its pre-change value, run P more s (default: 300)\n"
+            "  --placement-interval-s I  Placement sampling interval (default: 2)\n"
+            "  --placement-dump FILE  Each poll append f64 t then one byte per Zipf rank (current\n"
+            "                       shuffle): 1 if that rank's page is on node 0, else 0\n"
             "Perf (enabled by --perf-out):\n"
             "  --perf-out PREFIX    Write PREFIX_{samples.bin,lost.csv,meta.json,perm.bin}\n"
             "  --perf-period N      PEBS sample period for the L3-miss event (default: 1007)\n"
@@ -920,6 +1111,8 @@ int main(int argc, char **argv)
         .perf_period = 1007,
         .perf_ring_pages = 512,
         .ev_config = {0x20d1},
+        .post_recover_s = 300.0,
+        .placement_interval_s = 2.0,
     };
 
     for (int i = 1; i < argc; i++) {
@@ -977,6 +1170,14 @@ int main(int argc, char **argv)
             o.perf_keep_all = 1;
         } else if (!strcmp(a, "--no-pin")) {
             o.pin = 0;
+        } else if (!strcmp(a, "--reshuffle-on-steady")) {
+            bad = !v || parse_dbl(v, &o.reshuffle_steady_window_s) || o.reshuffle_steady_window_s <= 0, i++;
+        } else if (!strcmp(a, "--post-recover-s")) {
+            bad = !v || parse_dbl(v, &o.post_recover_s) || o.post_recover_s < 0, i++;
+        } else if (!strcmp(a, "--placement-interval-s")) {
+            bad = !v || parse_dbl(v, &o.placement_interval_s) || o.placement_interval_s <= 0, i++;
+        } else if (!strcmp(a, "--placement-dump")) {
+            bad = !v, o.placement_dump = v, i++;
         } else if (!strcmp(a, "--help") || !strcmp(a, "-h")) {
             usage(argv[0]);
             return 0;
@@ -994,6 +1195,15 @@ int main(int argc, char **argv)
         o.threads <= 0 || o.threads > 65535 || o.duration_s <= 0.0) {
         fprintf(stderr, "Invalid parameters: bytes=%zu page_size=%zu threads=%d duration_s=%g\n",
                 o.bytes, o.page_size, o.threads, o.duration_s);
+        return 1;
+    }
+    if (o.reshuffle_steady_window_s > 0 && o.perf_out) {
+        /* perf's perm.bin records one layout; a second one would mislabel samples. */
+        fprintf(stderr, "--reshuffle-on-steady cannot be combined with --perf-out\n");
+        return 1;
+    }
+    if (o.placement_dump && !(o.reshuffle_steady_window_s > 0)) {
+        fprintf(stderr, "--placement-dump needs --reshuffle-on-steady\n");
         return 1;
     }
     if (o.perf_out) {
@@ -1089,16 +1299,7 @@ int main(int argc, char **argv)
             perror("malloc");
             return 1;
         }
-        for (uint64_t i = 0; i < pages; i++)
-            perm[i] = (uint32_t)i;
-        struct rng r;
-        rng_seed(&r, o.seed ^ 0x5eed5eedull);
-        for (uint64_t i = pages - 1; i > 0; i--) {
-            uint64_t j = rng_next(&r) % (i + 1);
-            uint32_t t = perm[i];
-            perm[i] = perm[j];
-            perm[j] = t;
-        }
+        fill_perm(perm, pages, o.seed ^ 0x5eed5eedull);
     }
 
     printf("zipf_bench: bytes=%zu page_size=%zu pages=%" PRIu64 " hot_pages=%" PRIu64
@@ -1228,6 +1429,9 @@ int main(int argc, char **argv)
     static struct tstat aux0[MAX_TASKS], aux1[MAX_TASKS];
     int naux0 = task_snapshot(w, launched, aux0);
     sh.start = 1;
+    if (o.reshuffle_steady_window_s > 0 &&
+        placement_monitor(&o, &sh, w, launched, o.seed ^ 0xc0ffee5eedull))
+        sh.stop = 1;
 
     uint64_t total = 0, hot = 0, max_ns = 0, sink = 0;
     for (int t = 0; t < launched; t++) {
@@ -1286,6 +1490,8 @@ int main(int argc, char **argv)
     }
 
     free(w);
+    if (sh.perm != perm)
+        free(sh.perm);
     free(perm);
     free(cpus);
     munmap(raw, map_len);

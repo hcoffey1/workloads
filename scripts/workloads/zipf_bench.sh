@@ -39,6 +39,10 @@ config_zipf_bench(){
     [[ "${zipf_bench_pin}" == "0" ]] && zipf_bench_args+=" --no-pin"
     [[ "${zipf_bench_thp}" == "1" ]] && zipf_bench_args+=" --thp"
     [[ -n "${ZIPF_BENCH_CPUS:-}" ]] && zipf_bench_args+=" --cpus ${ZIPF_BENCH_CPUS}"   # explicit worker CPUs, e.g. keep off ARMS cores
+    # Hot-set change: swap the shuffle once fast-tier occupancy holds steady for this many s.
+    [[ -n "${ZIPF_BENCH_RESHUFFLE_ON_STEADY:-}" ]] && zipf_bench_args+=" --reshuffle-on-steady ${ZIPF_BENCH_RESHUFFLE_ON_STEADY}"
+    [[ -n "${ZIPF_BENCH_POST_RECOVER_S:-}" ]] && zipf_bench_args+=" --post-recover-s ${ZIPF_BENCH_POST_RECOVER_S}"
+    [[ -n "${ZIPF_BENCH_PLACEMENT_INTERVAL_S:-}" ]] && zipf_bench_args+=" --placement-interval-s ${ZIPF_BENCH_PLACEMENT_INTERVAL_S}"
     return 0
 }
 
@@ -57,6 +61,7 @@ run_zipf_bench(){
 
     generate_workload_filenames "$workload"
     local args="$zipf_bench_args"
+    [[ "${ZIPF_BENCH_PLACEMENT_DUMP:-0}" == "1" ]] && args+=" --placement-dump ${STDOUT%_stdout.txt}_placement.bin"
     if [[ "${zipf_bench_perf}" == "1" ]]; then
         args+=" --perf-out ${STDOUT%_stdout.txt}_perf --perf-period ${zipf_bench_perf_period} --perf-ring-pages ${zipf_bench_perf_ring_pages}"
         [[ "${zipf_bench_perf_drop_all}" == "1" ]] && args+=" --perf-drop-all"
